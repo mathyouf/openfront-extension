@@ -5,16 +5,6 @@
   if (!ns) return;
 
   const { state, constants, fn } = ns;
-  const OPEN_ICON_SVG =
-    "<svg viewBox='0 0 24 24' width='14' height='14' aria-hidden='true'>" +
-    "<path d='M9 6L4 12L9 18' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/>" +
-    "<path d='M20 4V20' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round'/>" +
-    "</svg>";
-  const CLOSED_ICON_SVG =
-    "<svg viewBox='0 0 24 24' width='14' height='14' aria-hidden='true'>" +
-    "<path d='M15 6L20 12L15 18' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/>" +
-    "<path d='M4 4V20' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round'/>" +
-    "</svg>";
   const COUNTRY_MARKER_SVG_URI =
     "data:image/svg+xml;utf8," +
     encodeURIComponent(
@@ -30,7 +20,8 @@
     emojiSearch: "Emoji",
     allianceRequest: "Alliance",
     boatOnePercent: "Boat 1%",
-    territoryCycle: "Mini Terr",
+    territoryCycle: "Cycle Mini",
+    lastOfeAlert: "Last Alert",
   };
 
   function keyCodeLabel(code) {
@@ -56,23 +47,12 @@
     } catch (_) {}
   }
 
-  function setToggleIcon(toggle, visible) {
-    if (!toggle) return;
-    toggle.innerHTML = visible ? OPEN_ICON_SVG : CLOSED_ICON_SVG;
-  }
-
   function setShortcutPanelVisible(visible) {
     if (!state.shortcutPanelState) return;
     state.shortcutPanelState.visible = visible;
     state.shortcutPanelState.panel.style.display = visible ? "" : "none";
     state.shortcutPanelState.notice.style.display = "none";
-    setToggleIcon(state.shortcutPanelState.toggle, visible);
-    state.shortcutPanelState.toggle.title = visible ? "Hide shortcuts" : "Show shortcuts";
-    state.shortcutPanelState.toggle.style.opacity = visible ? "0.8" : "1";
-    state.shortcutPanelState.toggle.setAttribute(
-      "aria-label",
-      visible ? "Hide shortcuts" : "Show shortcuts",
-    );
+    state.shortcutPanelState.toggle.style.display = visible ? "none" : "";
     hideInfoTooltip();
     updatePanelPlacement();
     writePanelVisibleSetting(visible);
@@ -82,7 +62,7 @@
     if (!state.shortcutPanelState) return;
     const { panel, toggle, notice } = state.shortcutPanelState;
 
-    panel.style.left = "40px";
+    panel.style.left = "12px";
     panel.style.top = "50%";
     panel.style.transform = "translateY(-50%)";
 
@@ -138,9 +118,6 @@
 
     state.shortcutPanelState.panel.style.width = "min(126px,26vw)";
     state.shortcutPanelState.panel.style.padding = "3px 4px";
-    state.shortcutPanelState.title.textContent = "Shortcuts";
-    state.shortcutPanelState.title.style.fontSize = "9px";
-    state.shortcutPanelState.title.style.marginBottom = "3px";
     state.shortcutPanelState.warning.style.display = "none";
     const showSpawnNotice = state.gamePhase === "spawn" && state.shortcutPanelState.visible;
     state.shortcutPanelState.notice.style.display = showSpawnNotice ? "flex" : "none";
@@ -235,35 +212,48 @@
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.id = "ofe-shortcuts-toggle";
-    setToggleIcon(toggle, false);
+    toggle.textContent = "Shortcuts";
     toggle.title = "Show shortcuts";
     toggle.setAttribute("aria-label", "Show shortcuts");
     toggle.style.cssText =
       "position:fixed;left:12px;top:50%;z-index:10030;transform:translateY(-50%);" +
-      "border:1px solid rgba(148,163,184,0.45);background:rgba(15,23,42,0.95);" +
-      "color:#fff;border-radius:999px;width:24px;height:24px;padding:0;" +
+      "height:26px;padding:0 10px;border-radius:8px;border:1px solid rgba(148,163,184,0.22);" +
+      "background:rgba(9,14,24,0.94);color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,0.34);" +
+      "backdrop-filter:blur(3px);font-size:11px;font-weight:700;" +
       "display:flex;align-items:center;justify-content:center;" +
-      "cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,0.35);";
+      "cursor:pointer;display:none;";
 
     const panel = document.createElement("div");
     panel.id = "ofe-shortcuts-panel";
     panel.style.cssText =
-      "position:fixed;left:40px;top:50%;z-index:10029;transform:translateY(-50%);width:min(126px,26vw);" +
+      "position:fixed;left:12px;top:50%;z-index:10029;transform:translateY(-50%);width:min(126px,26vw);" +
       "background:linear-gradient(180deg,rgba(11,18,32,0.96),rgba(10,15,28,0.94));" +
       "border:1px solid rgba(148,163,184,0.3);color:#e2e8f0;border-radius:12px;" +
       "padding:3px 4px;box-shadow:0 10px 22px rgba(0,0,0,0.38);font-size:7px;line-height:1.25;" +
       "backdrop-filter:blur(3px);";
 
+    const header = document.createElement("div");
+    header.style.cssText =
+      "display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px;";
+
     const title = document.createElement("div");
     title.textContent = "Shortcuts";
-    title.style.cssText = "font-weight:700;color:#fff;margin-bottom:3px;font-size:9px;";
+    title.style.cssText = "font-weight:700;color:#fff;font-size:9px;";
+
+    const hide = document.createElement("button");
+    hide.type = "button";
+    hide.textContent = "Hide";
+    hide.style.cssText =
+      "height:18px;padding:0 6px;border-radius:6px;border:1px solid rgba(148,163,184,0.2);" +
+      "background:rgba(15,23,42,0.65);color:#cbd5e1;font-size:9px;font-weight:600;cursor:pointer;";
+    hide.addEventListener("click", () => setShortcutPanelVisible(false));
 
     const status = document.createElement("div");
     status.style.cssText = "display:flex;flex-direction:column;gap:0;";
 
     const notice = document.createElement("div");
     notice.style.cssText =
-      "display:none;position:fixed;left:40px;top:50%;z-index:10029;pointer-events:none;" +
+      "display:none;position:fixed;left:12px;top:50%;z-index:10029;pointer-events:none;" +
       "display:flex;align-items:center;gap:7px;" +
       "width:min(188px,42vw);padding:6px 9px;border-radius:11px;" +
       "background:linear-gradient(180deg,rgba(9,14,28,0.96),rgba(8,18,40,0.9));" +
@@ -283,7 +273,9 @@
       "background:rgba(2,6,23,0.96);border:1px solid rgba(148,163,184,0.35);" +
       "color:#e2e8f0;font-size:10px;line-height:1.25;box-shadow:0 6px 20px rgba(0,0,0,0.35);";
 
-    panel.appendChild(title);
+    header.appendChild(title);
+    header.appendChild(hide);
+    panel.appendChild(header);
     panel.appendChild(status);
     panel.appendChild(warning);
 
@@ -295,7 +287,9 @@
     state.shortcutPanelState = {
       toggle,
       panel,
+      header,
       title,
+      hide,
       notice,
       status,
       warning,

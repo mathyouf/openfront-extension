@@ -12,6 +12,7 @@ Chrome extension that adds quality-of-life improvements to [openfront.io](https:
 
 ### Sound alerts
 - **Per-sound settings** — Every OFE sound has its own toggle in the Extension settings tab, plus a `Listen` button so you can preview it without waiting for the in-game event.
+- **Inbound attack warnings** — Boat attacks and ground attacks each have their own strong, easy-to-tell-apart alert sound.
 - **Transport ship sounds** — A distinct sound plays when one of your transport ships lands, and a different sound plays when one is destroyed.
 - **Warship destroyed sound** — A separate alert plays when one of your warships is destroyed.
 - **Neighbor alerts** — Sleeping neighbors and traitor neighbors each have their own sound and setting.

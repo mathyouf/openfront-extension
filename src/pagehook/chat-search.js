@@ -362,6 +362,7 @@
       "position:fixed;left:50%;top:20px;transform:translateX(-50%);" +
       "z-index:10020;width:min(620px,92vw);background:#0f172a;border:1px solid #334155;" +
       "border-radius:12px;padding:10px;box-shadow:0 18px 50px rgba(0,0,0,0.5);";
+    fn.installOverlayInteractionGuards?.(panel);
 
     const title = document.createElement("div");
     title.textContent = "Quick chat search";
@@ -565,6 +566,8 @@
           `No hovered player detected. Opened chat with ${fn.getPlayerDisplayName(
             recipient,
           )}.`,
+          undefined,
+          { focusID: fn.resolvePlayerSmallID?.(recipient) },
         );
       }
     }

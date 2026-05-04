@@ -27,6 +27,8 @@
         "src/pagehook/keybinds.js",
         "src/pagehook/settings-ui.js",
         "src/pagehook/shortcut-panel.js",
+        "src/pagehook/alliance-panel.js",
+        "src/pagehook/events-panel.js",
         "src/pagehook/chat-search.js",
         "src/pagehook/emoji-priority.js",
         "src/pagehook/emoji-search.js",

@@ -303,6 +303,7 @@
       root.id = ROOT_ID;
       root.className = "flex flex-col gap-2";
       buildExtensionTabContent(root);
+      fn.installOverlayInteractionGuards?.(root);
       scroll.appendChild(root);
     }
     return root;

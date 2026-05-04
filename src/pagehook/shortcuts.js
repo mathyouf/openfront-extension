@@ -11,6 +11,7 @@
     if (!recipient || typeof recipient.id !== "function") return;
 
     const recipientName = fn.getPlayerDisplayName(recipient) || `#${recipient.id()}`;
+    const recipientFocusID = fn.resolvePlayerSmallID?.(recipient);
 
     const playerPanel = document.querySelector("player-panel");
     if (
@@ -27,6 +28,7 @@
           fn.pushBottomRightLog(
             `Alliance request sent to ${recipientName}`,
             constants.MESSAGE_TYPE.ALLIANCE_REQUEST,
+            { focusID: recipientFocusID },
           );
           return;
         } catch (_) {}
@@ -47,6 +49,7 @@
         fn.pushBottomRightLog(
           `Alliance request sent to ${recipientName}`,
           constants.MESSAGE_TYPE.ALLIANCE_REQUEST,
+          { focusID: recipientFocusID },
         );
       } catch (_) {}
     }
@@ -111,6 +114,12 @@
           }
           case "boatOnePercent": {
             if (fn.triggerBoatOnePercentAttack) fn.triggerBoatOnePercentAttack();
+            break;
+          }
+          case "lastOfeAlert": {
+            if (!fn.focusLastOfeAlert || !fn.focusLastOfeAlert()) {
+              fn.pushBottomRightLog("No recent OFE alert to jump to.");
+            }
             break;
           }
           default:

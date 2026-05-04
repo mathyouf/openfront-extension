@@ -234,6 +234,9 @@
     if (!emojiTable || typeof emojiTable.showTable !== "function") return;
 
     const target = getEmojiTargetContext(emojiTable);
+    const targetFocusID = target && target.recipient
+      ? fn.resolvePlayerSmallID?.(target.recipient)
+      : null;
     if (!target || !target.recipient) {
       fn.pushBottomRightLog("Hover a player or owned tile and press emoji again.");
       return;
@@ -244,12 +247,14 @@
     emojiTable.showTable((emoji) => {
       const emojiIndex = findEmojiIndex(emoji);
       if (emojiIndex < 0) {
-        fn.pushBottomRightLog("Could not send emoji.");
+        fn.pushBottomRightLog("Could not send emoji.", undefined, { focusID: targetFocusID });
         return;
       }
 
       if (!sendEmojiIntent(target.recipient, emojiIndex)) {
-        fn.pushBottomRightLog("Emoji send unavailable right now.");
+        fn.pushBottomRightLog("Emoji send unavailable right now.", undefined, {
+          focusID: targetFocusID,
+        });
         return;
       }
 

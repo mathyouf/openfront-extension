@@ -19,7 +19,9 @@
 
   ns.constants.GAME_UPDATE_TYPE = {
     UNIT: 1,
+    PLAYER: 2,
     DISPLAY_EVENT: 3,
+    ALLIANCE_EXTENSION: 9,
     UNIT_INCOMING: 14,
   };
 
@@ -50,9 +52,15 @@
     },
     territoryCycle: {
       action: "territoryCycle",
-      label: "Mini Territories",
+      label: "Cycle Mini",
       desc: "Jump camera between disconnected mini territories (100 tiles or fewer)",
       defaultCode: "KeyL",
+    },
+    lastOfeAlert: {
+      action: "lastOfeAlert",
+      label: "Last OFE Alert",
+      desc: "Jump to the most recent clickable OFE alert.",
+      defaultCode: "KeyJ",
     },
   };
 
@@ -69,9 +77,17 @@
       label: "OFE: Boat Landing",
       desc: "Play a harbor bell when one of your transport ships lands.",
     },
+    boatInbound: {
+      label: "OFE: Boat Inbound",
+      desc: "Play a loud naval horn and sonar ping when an enemy transport ship is sent to you.",
+    },
     boatDestroyed: {
       label: "OFE: Boat Destroyed",
       desc: "Play a splash-like alert when one of your transport ships is destroyed.",
+    },
+    groundAttackInbound: {
+      label: "OFE: Ground Attack Inbound",
+      desc: "Play a harsh marching alarm when a new ground attack is launched at you.",
     },
     warshipDestroyed: {
       label: "OFE: Warship Destroyed",

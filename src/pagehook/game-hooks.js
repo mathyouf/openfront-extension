@@ -6,6 +6,8 @@
 
   const { state, constants, fn } = ns;
   const BOAT_OVERRIDE_WINDOW_MS = 1500;
+  const INBOUND_ATTACK_ALERT_COOLDOWN_TICKS = 100;
+  const GROUND_ATTACK_ALERT_MIN_RATIO = 0.15;
   let sharedAudioContext = null;
   let audioUnlocked = false;
   let audioUnlockInitialized = false;
@@ -146,6 +148,90 @@
     } catch (_) {}
   }
 
+  function playBoatInboundAlert(force = false) {
+    if (!force && !soundEnabled("boatInbound")) return;
+    try {
+      // Extra-loud naval warning: heavy horn pulses with bright sonar pings.
+      playTone({
+        type: "sawtooth",
+        frequency: 196,
+        sweepTo: 233.08,
+        duration: 0.24,
+        gain: 0.17,
+        attack: 0.003,
+        release: 0.22,
+      });
+      playTone({
+        type: "triangle",
+        frequency: 392,
+        sweepTo: 493.88,
+        start: 0.03,
+        duration: 0.19,
+        gain: 0.095,
+        attack: 0.003,
+        release: 0.17,
+      });
+      playTone({
+        type: "sine",
+        frequency: 783.99,
+        start: 0.15,
+        duration: 0.08,
+        gain: 0.07,
+        attack: 0.002,
+        release: 0.07,
+      });
+      playTone({
+        type: "triangle",
+        frequency: 98,
+        sweepTo: 87.31,
+        start: 0.02,
+        duration: 0.26,
+        gain: 0.055,
+        attack: 0.004,
+        release: 0.23,
+      });
+      playTone({
+        type: "sawtooth",
+        frequency: 220,
+        sweepTo: 261.63,
+        start: 0.28,
+        duration: 0.24,
+        gain: 0.165,
+        attack: 0.003,
+        release: 0.22,
+      });
+      playTone({
+        type: "triangle",
+        frequency: 440,
+        sweepTo: 523.25,
+        start: 0.31,
+        duration: 0.19,
+        gain: 0.09,
+        attack: 0.003,
+        release: 0.17,
+      });
+      playTone({
+        type: "sine",
+        frequency: 987.77,
+        start: 0.43,
+        duration: 0.08,
+        gain: 0.075,
+        attack: 0.002,
+        release: 0.07,
+      });
+      playTone({
+        type: "triangle",
+        frequency: 110,
+        sweepTo: 98,
+        start: 0.3,
+        duration: 0.26,
+        gain: 0.05,
+        attack: 0.004,
+        release: 0.23,
+      });
+    } catch (_) {}
+  }
+
   function playBoatDestroyedChime(force = false) {
     if (!force && !soundEnabled("boatDestroyed")) return;
     try {
@@ -166,6 +252,68 @@
         duration: 0.16,
         gain: 0.055,
         release: 0.14,
+      });
+    } catch (_) {}
+  }
+
+  function playGroundAttackInboundAlert(force = false) {
+    if (!force && !soundEnabled("groundAttackInbound")) return;
+    try {
+      // Urgent land-attack klaxon: sharp marching pulses with a heavy low body.
+      playTone({
+        type: "square",
+        frequency: 311.13,
+        duration: 0.09,
+        gain: 0.14,
+        attack: 0.002,
+        release: 0.07,
+      });
+      playTone({
+        type: "square",
+        frequency: 415.3,
+        start: 0.11,
+        duration: 0.09,
+        gain: 0.14,
+        attack: 0.002,
+        release: 0.07,
+      });
+      playTone({
+        type: "square",
+        frequency: 311.13,
+        start: 0.22,
+        duration: 0.09,
+        gain: 0.14,
+        attack: 0.002,
+        release: 0.07,
+      });
+      playTone({
+        type: "square",
+        frequency: 415.3,
+        start: 0.33,
+        duration: 0.09,
+        gain: 0.14,
+        attack: 0.002,
+        release: 0.07,
+      });
+      playTone({
+        type: "sawtooth",
+        frequency: 123.47,
+        sweepTo: 110,
+        start: 0.01,
+        duration: 0.48,
+        gain: 0.06,
+        attack: 0.004,
+        release: 0.44,
+      });
+      playTone({
+        type: "triangle",
+        frequency: 155.56,
+        sweepTo: 146.83,
+        start: 0.02,
+        duration: 0.45,
+        gain: 0.04,
+        attack: 0.004,
+        release: 0.4,
       });
     } catch (_) {}
   }
@@ -413,7 +561,9 @@
       spawnEntry: playSpawnEntryChime,
       gameStart: playGameStartChime,
       boatLanding: playBoatLandingChime,
+      boatInbound: playBoatInboundAlert,
       boatDestroyed: playBoatDestroyedChime,
+      groundAttackInbound: playGroundAttackInboundAlert,
       warshipDestroyed: playWarshipDestroyedChime,
       neighborSleeping: playNeighborSleepingAlert,
       neighborTraitor: playNeighborTraitorAlert,
@@ -423,6 +573,46 @@
     };
 
     return previews[key] || null;
+  }
+
+  function pushSoundFeedEvent(description, options = {}) {
+    if (!description || !fn.pushBottomRightEvent) return;
+    fn.pushBottomRightEvent({
+      description,
+      type: constants.MESSAGE_TYPE.CHAT,
+      unsafeDescription: false,
+      highlight: options.highlight !== false,
+      duration: options.duration != null ? options.duration : 900,
+      focusID: options.focusID,
+      unitID: options.unitID,
+      x: options.x,
+      y: options.y,
+    });
+  }
+
+  function getMyFocusID() {
+    if (!state.myClientID) return null;
+    const myPID = Number(state.clientIDToPlayerID[state.myClientID]);
+    return Number.isFinite(myPID) ? myPID : null;
+  }
+
+  function getWorldPositionFromTile(tileRef) {
+    const numericTile = Number(tileRef);
+    if (!Number.isFinite(numericTile)) return null;
+
+    const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
+    if (!game || typeof game.x !== "function" || typeof game.y !== "function") {
+      return null;
+    }
+
+    try {
+      const x = Number(game.x(numericTile));
+      const y = Number(game.y(numericTile));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return { x, y };
+    } catch (_) {
+      return null;
+    }
   }
 
   fn.playExtensionSound = (key, force = false) => {
@@ -442,6 +632,127 @@
     return fn.playExtensionSound(key, true);
   };
 
+  function pruneAlertCooldownMap(map, tick) {
+    if (!(map instanceof Map)) return;
+    const cutoff = tick - INBOUND_ATTACK_ALERT_COOLDOWN_TICKS;
+    for (const [key, lastTick] of map.entries()) {
+      if (!Number.isFinite(lastTick) || lastTick < cutoff) {
+        map.delete(key);
+      }
+    }
+  }
+
+  function inboundAlertAllowed(map, key, tick) {
+    if (!(map instanceof Map) || key == null) return true;
+    const lastTick = map.get(key);
+    return !Number.isFinite(lastTick) || tick - lastTick >= INBOUND_ATTACK_ALERT_COOLDOWN_TICKS;
+  }
+
+  function markInboundAlertTick(map, keys, tick) {
+    if (!(map instanceof Map)) return;
+    for (const key of keys) {
+      if (key == null) continue;
+      map.set(key, tick);
+    }
+  }
+
+  function isHostilePlayerSmallId(playerSmallId, myPID) {
+    const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
+    if (
+      !game ||
+      typeof game.myPlayer !== "function" ||
+      typeof game.playerBySmallID !== "function"
+    ) {
+      return Number(playerSmallId) !== Number(myPID);
+    }
+
+    try {
+      const me = game.myPlayer();
+      const other = game.playerBySmallID(Number(playerSmallId));
+      if (
+        !me ||
+        !other ||
+        typeof other.smallID !== "function" ||
+        other.smallID() === Number(myPID)
+      ) {
+        return false;
+      }
+      if (typeof me.isFriendly === "function" && me.isFriendly(other)) {
+        return false;
+      }
+      return true;
+    } catch (_) {}
+
+    return Number(playerSmallId) !== Number(myPID);
+  }
+
+  function scheduleBoatInboundAlert(unitIds, myPID, tick) {
+    if (!Array.isArray(unitIds) || !unitIds.length) return;
+
+    window.setTimeout(() => {
+      if (state.lastBoatInboundSoundTick === tick) return;
+
+      const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
+      if (
+        !game ||
+        typeof game.myPlayer !== "function" ||
+        typeof game.unit !== "function"
+      ) {
+        return;
+      }
+
+      const me = game.myPlayer();
+      if (!me || (typeof me.isAlive === "function" && !me.isAlive())) {
+        return;
+      }
+
+      pruneAlertCooldownMap(state.boatInboundAlertTickByAttacker, tick);
+
+      const eligibleBoatInboundAlertKeys = new Set();
+      for (const unitId of unitIds) {
+        const numericId = Number(unitId);
+        if (!Number.isFinite(numericId)) continue;
+
+        let owner = null;
+        try {
+          const unit = game.unit(numericId);
+          owner = unit && typeof unit.owner === "function" ? unit.owner() : null;
+        } catch (_) {
+          owner = null;
+        }
+        if (!owner || typeof owner.smallID !== "function") continue;
+
+        const attackerSmallId = Number(owner.smallID());
+        if (!Number.isFinite(attackerSmallId) || attackerSmallId <= 0) continue;
+        if (!isHostilePlayerSmallId(attackerSmallId, myPID)) continue;
+
+        const attackerKey = `player:${attackerSmallId}`;
+        if (
+          inboundAlertAllowed(
+            state.boatInboundAlertTickByAttacker,
+            attackerKey,
+            tick,
+          )
+        ) {
+          eligibleBoatInboundAlertKeys.add(attackerKey);
+        }
+      }
+
+      if (!eligibleBoatInboundAlertKeys.size) return;
+
+      state.lastBoatInboundSoundTick = tick;
+      markInboundAlertTick(
+        state.boatInboundAlertTickByAttacker,
+        eligibleBoatInboundAlertKeys,
+        tick,
+      );
+      pushSoundFeedEvent("Enemy boat inbound", {
+        unitID: unitIds[0],
+      });
+      playBoatInboundAlert();
+    }, 0);
+  }
+
   function maybePlayGameSounds(gu) {
     if (!gu || gu.tick == null) {
       return;
@@ -456,11 +767,26 @@
     if (!updates) return;
 
     let ownTransportDeactivations = 0;
+    let boatInboundEvents = 0;
     let ownTransportDestroyedEvents = 0;
+    let groundAttackInboundEvents = 0;
     let ownWarshipDestroyedEvents = 0;
     let mirvInboundEvents = 0;
     let nukeInboundEvents = 0;
     let hydrogenInboundEvents = 0;
+    const boatInboundUnitIds = [];
+    const landedTransportUnitIds = [];
+    const landedTransportPositions = [];
+    const ownWarshipInactiveUnitIds = [];
+    const ownWarshipInactivePositions = [];
+    const mirvInboundUnitIds = [];
+    const nukeInboundUnitIds = [];
+    const hydrogenInboundUnitIds = [];
+    const eligibleGroundInboundAlertKeys = new Set();
+    let groundAttackFocusID = null;
+
+    pruneAlertCooldownMap(state.boatInboundAlertTickByAttacker, gu.tick);
+    pruneAlertCooldownMap(state.groundAttackInboundAlertTickByAttacker, gu.tick);
 
     const unitUpdates = Array.isArray(updates[constants.GAME_UPDATE_TYPE.UNIT])
       ? updates[constants.GAME_UPDATE_TYPE.UNIT]
@@ -473,7 +799,80 @@
         entry.isActive === false
       ) {
         ownTransportDeactivations += 1;
+        if (entry.id != null) {
+          landedTransportUnitIds.push(Number(entry.id));
+        }
+        landedTransportPositions.push(
+          getWorldPositionFromTile(entry.pos != null ? entry.pos : entry.lastPos),
+        );
+      } else if (
+        entry &&
+        entry.unitType === "Warship" &&
+        Number(entry.ownerID) === myPID &&
+        entry.isActive === false &&
+        entry.id != null
+      ) {
+        ownWarshipInactiveUnitIds.push(Number(entry.id));
+        ownWarshipInactivePositions.push(
+          getWorldPositionFromTile(entry.pos != null ? entry.pos : entry.lastPos),
+        );
       }
+    }
+
+    const playerUpdates = Array.isArray(updates[constants.GAME_UPDATE_TYPE.PLAYER])
+      ? updates[constants.GAME_UPDATE_TYPE.PLAYER]
+      : [];
+    let nextIncomingGroundAttackIds = null;
+    for (const entry of playerUpdates) {
+      if (!entry || !Array.isArray(entry.incomingAttacks)) continue;
+      const playerId = Number(
+        entry.smallID != null ? entry.smallID : entry.id,
+      );
+      if (playerId !== myPID) continue;
+
+      const activeIds = nextIncomingGroundAttackIds || new Set();
+      for (const attack of entry.incomingAttacks) {
+        if (!attack || attack.retreating || attack.id == null) continue;
+        const attackId = String(attack.id);
+        if (activeIds.has(attackId)) continue;
+        activeIds.add(attackId);
+        if (
+          state.groundAttackTrackingReady &&
+          !state.seenIncomingGroundAttackIds.has(attackId)
+        ) {
+          groundAttackInboundEvents += 1;
+          const myTroopsNow = Number(
+            entry.troops != null ? entry.troops : state.myPlayerTroops,
+          );
+          const attackTroops = Number(attack.troops);
+          const minAlertTroops = Number.isFinite(myTroopsNow) && myTroopsNow > 0
+            ? myTroopsNow * GROUND_ATTACK_ALERT_MIN_RATIO
+            : NaN;
+          const attackerSmallId = Number(attack.attackerID);
+          const attackerKey = `player:${attackerSmallId}`;
+          if (
+            Number.isFinite(attackTroops) &&
+            Number.isFinite(minAlertTroops) &&
+            attackTroops >= minAlertTroops &&
+            isHostilePlayerSmallId(attackerSmallId, myPID) &&
+            inboundAlertAllowed(
+              state.groundAttackInboundAlertTickByAttacker,
+              attackerKey,
+              gu.tick,
+            )
+          ) {
+            eligibleGroundInboundAlertKeys.add(attackerKey);
+            if (groundAttackFocusID == null) {
+              groundAttackFocusID = attackerSmallId;
+            }
+          }
+        }
+      }
+      nextIncomingGroundAttackIds = activeIds;
+    }
+    if (nextIncomingGroundAttackIds) {
+      state.seenIncomingGroundAttackIds = nextIncomingGroundAttackIds;
+      state.groundAttackTrackingReady = true;
     }
 
     const displayUpdates = Array.isArray(updates[constants.GAME_UPDATE_TYPE.DISPLAY_EVENT])
@@ -502,18 +901,33 @@
     for (const entry of incomingUpdates) {
       if (!entry || Number(entry.playerID) !== myPID) continue;
 
-      if (entry.messageType === constants.MESSAGE_TYPE.MIRV_INBOUND) {
+      if (entry.messageType === constants.MESSAGE_TYPE.NAVAL_INVASION_INBOUND) {
+        const unitId = Number(entry.unitID);
+        if (
+          Number.isFinite(unitId) &&
+          !state.seenIncomingBoatUnitIds.has(unitId)
+        ) {
+          state.seenIncomingBoatUnitIds.add(unitId);
+          boatInboundEvents += 1;
+          boatInboundUnitIds.push(unitId);
+        }
+      } else if (entry.messageType === constants.MESSAGE_TYPE.MIRV_INBOUND) {
         mirvInboundEvents += 1;
+        if (entry.unitID != null) mirvInboundUnitIds.push(Number(entry.unitID));
       } else if (entry.messageType === constants.MESSAGE_TYPE.NUKE_INBOUND) {
         nukeInboundEvents += 1;
+        if (entry.unitID != null) nukeInboundUnitIds.push(Number(entry.unitID));
       } else if (entry.messageType === constants.MESSAGE_TYPE.HYDROGEN_BOMB_INBOUND) {
         hydrogenInboundEvents += 1;
+        if (entry.unitID != null) hydrogenInboundUnitIds.push(Number(entry.unitID));
       }
     }
 
     if (
       !ownTransportDeactivations &&
+      !boatInboundEvents &&
       !ownTransportDestroyedEvents &&
+      !groundAttackInboundEvents &&
       !ownWarshipDestroyedEvents &&
       !mirvInboundEvents &&
       !nukeInboundEvents &&
@@ -523,10 +937,24 @@
     }
 
     if (
+      boatInboundEvents > 0 &&
+      gu.tick !== state.lastBoatInboundSoundTick
+    ) {
+      scheduleBoatInboundAlert(boatInboundUnitIds, myPID, gu.tick);
+    }
+
+    if (
       ownTransportDestroyedEvents > 0 &&
       gu.tick !== state.lastBoatDestroyedSoundTick
     ) {
       state.lastBoatDestroyedSoundTick = gu.tick;
+      const destroyedTransportPosition = landedTransportPositions[0];
+      pushSoundFeedEvent("Transport ship destroyed", {
+        unitID: landedTransportUnitIds[0],
+        focusID: getMyFocusID(),
+        x: destroyedTransportPosition && destroyedTransportPosition.x,
+        y: destroyedTransportPosition && destroyedTransportPosition.y,
+      });
       playBoatDestroyedChime();
     }
 
@@ -535,7 +963,31 @@
       gu.tick !== state.lastBoatLandingSoundTick
     ) {
       state.lastBoatLandingSoundTick = gu.tick;
+      const landedTransportPosition = landedTransportPositions[0];
+      pushSoundFeedEvent("Transport ship landed", {
+        unitID: landedTransportUnitIds[0],
+        focusID: getMyFocusID(),
+        x: landedTransportPosition && landedTransportPosition.x,
+        y: landedTransportPosition && landedTransportPosition.y,
+      });
       playBoatLandingChime();
+    }
+
+    if (
+      groundAttackInboundEvents > 0 &&
+      eligibleGroundInboundAlertKeys.size > 0 &&
+      gu.tick !== state.lastGroundAttackInboundSoundTick
+    ) {
+      state.lastGroundAttackInboundSoundTick = gu.tick;
+      markInboundAlertTick(
+        state.groundAttackInboundAlertTickByAttacker,
+        eligibleGroundInboundAlertKeys,
+        gu.tick,
+      );
+      pushSoundFeedEvent("Ground attack inbound", {
+        focusID: groundAttackFocusID,
+      });
+      playGroundAttackInboundAlert();
     }
 
     if (
@@ -543,16 +995,31 @@
       gu.tick !== state.lastWarshipDestroyedSoundTick
     ) {
       state.lastWarshipDestroyedSoundTick = gu.tick;
+      const destroyedWarshipPosition = ownWarshipInactivePositions[0];
+      pushSoundFeedEvent("Warship destroyed", {
+        unitID: ownWarshipInactiveUnitIds[0],
+        focusID: getMyFocusID(),
+        x: destroyedWarshipPosition && destroyedWarshipPosition.x,
+        y: destroyedWarshipPosition && destroyedWarshipPosition.y,
+      });
       playWarshipDestroyedChime();
     }
 
     if (mirvInboundEvents > 0 && gu.tick !== state.lastMirvInboundSoundTick) {
       state.lastMirvInboundSoundTick = gu.tick;
+      pushSoundFeedEvent("MIRV inbound", {
+        duration: 1200,
+        unitID: mirvInboundUnitIds[0],
+      });
       playMirvInboundAlarm();
     }
 
     if (nukeInboundEvents > 0 && gu.tick !== state.lastNukeInboundSoundTick) {
       state.lastNukeInboundSoundTick = gu.tick;
+      pushSoundFeedEvent("Atom bomb inbound", {
+        duration: 1200,
+        unitID: nukeInboundUnitIds[0],
+      });
       playNukeInboundAlarm();
     }
 
@@ -561,6 +1028,10 @@
       gu.tick !== state.lastHydrogenInboundSoundTick
     ) {
       state.lastHydrogenInboundSoundTick = gu.tick;
+      pushSoundFeedEvent("Hydrogen bomb inbound", {
+        duration: 1200,
+        unitID: hydrogenInboundUnitIds[0],
+      });
       playHydrogenInboundAlarm();
     }
   }
@@ -677,6 +1148,8 @@
     }
   }
 
+  fn.navigateToPosition = navigateToPosition;
+
   async function fetchMapDimensions(gameMap, mapSize) {
     try {
       const fileName = gameMap.replace(/\s/g, "").toLowerCase();
@@ -699,7 +1172,23 @@
       for (const k in state.playerTroopsById) delete state.playerTroopsById[k];
       for (const k in state.clientIDToPlayerID) delete state.clientIDToPlayerID[k];
       state.myTilesSet.clear();
+      state.seenIncomingBoatUnitIds.clear();
+      state.boatInboundAlertTickByAttacker.clear();
+      state.groundAttackTrackingReady = false;
+      state.seenIncomingGroundAttackIds.clear();
+      state.groundAttackInboundAlertTickByAttacker.clear();
       state.neighborStatusById = {};
+      state.lastBoatLandingSoundTick = -1;
+      state.lastBoatInboundSoundTick = -1;
+      state.lastBoatDestroyedSoundTick = -1;
+      state.lastGroundAttackInboundSoundTick = -1;
+      state.lastWarshipDestroyedSoundTick = -1;
+      state.lastMirvInboundSoundTick = -1;
+      state.lastNukeInboundSoundTick = -1;
+      state.lastHydrogenInboundSoundTick = -1;
+      if (state.allianceExtensionPendingById instanceof Map) {
+        state.allianceExtensionPendingById.clear();
+      }
       setGamePhase("spawn");
     }
 
@@ -729,6 +1218,16 @@
             }
           }
         }
+      }
+
+      const allianceExtensionUpdates = Array.isArray(
+        updates[constants.GAME_UPDATE_TYPE.ALLIANCE_EXTENSION],
+      )
+        ? updates[constants.GAME_UPDATE_TYPE.ALLIANCE_EXTENSION]
+        : [];
+      for (const entry of allianceExtensionUpdates) {
+        if (!entry || entry.allianceID == null) continue;
+        fn.noteAllianceExtensionUpdate?.(Number(entry.allianceID), entry.playerID);
       }
     }
 
@@ -775,7 +1274,9 @@
   fn.triggerTerritoryCycle = () => {
     const live = collectOwnedTilesFromLiveGame();
     if (!live) {
-      fn.pushBottomRightLog("No game data available.");
+      fn.pushBottomRightLog("No game data available.", undefined, {
+        focusID: getMyFocusID(),
+      });
       return;
     }
 
@@ -783,13 +1284,10 @@
     const components = computeConnectedComponents(width, height, myTilesSet);
     const smallComponents = components.filter((component) => component.size <= 100);
 
-    if (components.length <= 1) {
-      fn.pushBottomRightLog("Territory is connected.");
-      return;
-    }
-
     if (!smallComponents.length) {
-      fn.pushBottomRightLog("No mini territories.");
+      fn.pushBottomRightLog("No mini territories.", undefined, {
+        focusID: getMyFocusID(),
+      });
       return;
     }
 
@@ -800,7 +1298,6 @@
     console.log(
       `[OFE] Switched to territory ${state.territoryCycleIndex + 1}/${smallComponents.length} (${target.size} tiles)`,
     );
-    fn.pushBottomRightLog("Mini Territories");
   };
 
   function getLiveMyPlayerTroops() {
@@ -1043,6 +1540,9 @@
   fn.initSocketHooks = () => {
     if (state.socketHooksInitialized) return;
     state.socketHooksInitialized = true;
+    if (!(state.gameSockets instanceof Set)) {
+      state.gameSockets = new Set();
+    }
 
     const eventBusScan = setInterval(() => {
       if (fn.ensureEventBusHooks && fn.ensureEventBusHooks()) {
@@ -1052,6 +1552,9 @@
 
     const origWsSend = WebSocket.prototype.send;
     WebSocket.prototype.send = function (data) {
+      if (state.gameSockets instanceof Set) {
+        state.gameSockets.add(this);
+      }
       if (typeof data === "string") {
         try {
           const msg = JSON.parse(data);
@@ -1063,6 +1566,14 @@
               msg.type === "ping")
           ) {
             state.latestGameSocket = this;
+          }
+          if (
+            msg &&
+            msg.type === "intent" &&
+            msg.intent &&
+            msg.intent.type === "allianceExtension"
+          ) {
+            fn.noteAllianceExtensionIntent?.(Number(msg.intent.recipient));
           }
         } catch (_) {}
       }
@@ -1084,9 +1595,17 @@
 
   fn.onGamePhaseChange((oldPhase, newPhase) => {
     if (oldPhase !== "spawn" && newPhase === "spawn") {
+      pushSoundFeedEvent("Spawn phase started", {
+        duration: 700,
+        focusID: getMyFocusID(),
+      });
       playSpawnEntryChime();
     }
     if (oldPhase === "spawn" && newPhase === "playing") {
+      pushSoundFeedEvent("Match started", {
+        duration: 700,
+        focusID: getMyFocusID(),
+      });
       playGameStartChime();
     }
   });
