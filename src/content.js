@@ -6,6 +6,7 @@
  * the game starts.
  *
  * Reads data from attributes on <html> set by page-hook.js (MAIN world):
+ *   - data-ofe-game-phase: current game phase from the live GameView
  *   - data-ofe-nations: nation positions for spawn dots
  */
 
@@ -16,7 +17,7 @@
   let spawnActive = false;
   let dotContainer = null;
   let cachedNameLayerContainer = null;
-  let nationsObserver = null;
+  let gameDataObserver = null;
   const markerById = new Map();
   const MARKER_SIZE = 24;
   const MARKER_TARGET_SCREEN_SIZE = 24;
@@ -101,15 +102,7 @@
   }
 
   function isSpawnPhase() {
-    const timer = document.querySelector("spawn-timer");
-    if (!timer) return false;
-    // SpawnTimer uses light DOM (createRenderRoot returns this).
-    // During spawn phase it renders a div with class "w-full".
-    if (timer.querySelector(".w-full") !== null) {
-      const style = getComputedStyle(timer);
-      return style.display !== "none" && style.visibility !== "hidden";
-    }
-    return false;
+    return document.documentElement.getAttribute("data-ofe-game-phase") === "spawn";
   }
 
   function ensureDotContainer() {
@@ -199,20 +192,24 @@
     }
   }
 
-  function initNationsObserver() {
-    if (nationsObserver) return;
-    nationsObserver = new MutationObserver((mutations) => {
+  function initGameDataObserver() {
+    if (gameDataObserver) return;
+    gameDataObserver = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
-        if (mutation.type !== "attributes" || mutation.attributeName !== "data-ofe-nations") {
-          continue;
+        if (mutation.type !== "attributes") continue;
+        if (mutation.attributeName === "data-ofe-game-phase") {
+          syncSpawnState();
+          return;
         }
-        if (spawnActive) updateSpawnDots();
-        break;
+        if (mutation.attributeName === "data-ofe-nations") {
+          if (spawnActive) updateSpawnDots();
+          return;
+        }
       }
     });
-    nationsObserver.observe(document.documentElement, {
+    gameDataObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-ofe-nations"],
+      attributeFilter: ["data-ofe-game-phase", "data-ofe-nations"],
     });
   }
 
@@ -232,7 +229,7 @@
 
   function init() {
     if (watchInterval) return;
-    initNationsObserver();
+    initGameDataObserver();
     watchInterval = setInterval(() => {
       syncSpawnState();
       if (spawnActive) {

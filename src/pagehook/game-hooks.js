@@ -12,14 +12,29 @@
   let audioUnlocked = false;
   let audioUnlockInitialized = false;
 
+  function writeGamePhaseAttribute(phase) {
+    try {
+      document.documentElement.setAttribute("data-ofe-game-phase", phase);
+      if (phase !== "spawn") {
+        document.documentElement.removeAttribute("data-ofe-nations");
+      }
+    } catch (_) {}
+  }
+
   function setGamePhase(newPhase) {
     const oldPhase = state.gamePhase;
-    if (oldPhase === newPhase) return;
+    if (oldPhase === newPhase) {
+      writeGamePhaseAttribute(newPhase);
+      return;
+    }
     state.gamePhase = newPhase;
+    writeGamePhaseAttribute(newPhase);
     for (const cb of ns._phaseListeners) {
       try { cb(oldPhase, newPhase); } catch (_) {}
     }
   }
+
+  setGamePhase(state.gamePhase || "none");
 
   fn.onGamePhaseChange = (callback) => {
     if (typeof callback === "function") {
@@ -1150,18 +1165,6 @@
 
   fn.navigateToPosition = navigateToPosition;
 
-  async function fetchMapDimensions(gameMap, mapSize) {
-    try {
-      const fileName = gameMap.replace(/\s/g, "").toLowerCase();
-      const resp = await fetch(`/maps/${fileName}/manifest.json`);
-      if (!resp.ok) return;
-      const manifest = await resp.json();
-      const meta = mapSize === "Compact" ? manifest.map4x : manifest.map;
-      state.mapWidth = meta.width;
-      state.mapHeight = meta.height;
-    } catch (_) {}
-  }
-
   function updateFromGameUpdate(gu) {
     if (!gu || typeof gu !== "object" || !gu.updates) {
       return;
@@ -1171,7 +1174,6 @@
       for (const k in state.playerTypeById) delete state.playerTypeById[k];
       for (const k in state.playerTroopsById) delete state.playerTroopsById[k];
       for (const k in state.clientIDToPlayerID) delete state.clientIDToPlayerID[k];
-      state.myTilesSet.clear();
       state.seenIncomingBoatUnitIds.clear();
       state.boatInboundAlertTickByAttacker.clear();
       state.groundAttackTrackingReady = false;
@@ -1241,7 +1243,7 @@
     }
 
     const nameData = gu.playerNameViewData;
-    if (nameData) {
+    if (nameData && state.gamePhase === "spawn") {
       const nations = {};
       for (const pid in nameData) {
         if (state.playerTypeById[pid] !== "NATION") continue;
@@ -1251,24 +1253,6 @@
       document.documentElement.setAttribute("data-ofe-nations", JSON.stringify(nations));
     }
 
-    try {
-      const packed = gu.packedTileUpdates;
-      if (packed && packed.length > 0 && state.myClientID) {
-        const myPID = Number(state.clientIDToPlayerID[state.myClientID]);
-        if (myPID) {
-          for (let i = 0; i < packed.length; i++) {
-            const tu = packed[i];
-            const tileRef = Number(tu >> 16n);
-            const playerId = Number(tu & 0xfffn);
-            if (playerId === myPID) {
-              state.myTilesSet.add(tileRef);
-            } else {
-              state.myTilesSet.delete(tileRef);
-            }
-          }
-        }
-      }
-    } catch (_) {}
   }
 
   fn.triggerTerritoryCycle = () => {
@@ -1446,10 +1430,6 @@
           if (msg.clientID) {
             state.myClientID = msg.clientID;
           }
-          const config = msg.gameStartInfo && msg.gameStartInfo.config;
-          if (config && config.gameMap) {
-            fetchMapDimensions(config.gameMap, config.gameMapSize || "Normal");
-          }
         }
       } catch (_) {}
 
@@ -1463,6 +1443,10 @@
 
     state.overrideNextBoat = true;
     const attackKey = fn.getBoatAttackKey ? fn.getBoatAttackKey() : "KeyB";
+    const parsedAttackKey =
+      typeof attackKey === "string" && attackKey.startsWith("Shift+")
+        ? { code: attackKey.slice(6), shiftKey: true }
+        : { code: attackKey || "KeyB", shiftKey: false };
     const previousRatio = readCurrentAttackRatio();
     const ratioTemporarilySet =
       previousRatio != null &&
@@ -1470,7 +1454,13 @@
       applyAttackRatio(0.01);
 
     state.boatDispatching = true;
-    window.dispatchEvent(new KeyboardEvent("keyup", { code: attackKey, bubbles: true }));
+    window.dispatchEvent(
+      new KeyboardEvent("keyup", {
+        code: parsedAttackKey.code,
+        shiftKey: parsedAttackKey.shiftKey,
+        bubbles: true,
+      }),
+    );
     state.boatDispatching = false;
 
     if (ratioTemporarilySet && previousRatio != null) {

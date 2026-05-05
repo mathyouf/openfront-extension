@@ -14,6 +14,7 @@
   const PREPARE_WARNING_TICKS = 90 * TICKS_PER_SECOND;
   const FLASH_WARNING_TICKS = 10 * TICKS_PER_SECOND;
   const INTERACTION_RELEASE_DELAY_MS = 90;
+  const PANEL_Z_INDEX = 190;
   const lastSeenAlliances = new Map();
   const recentlyExpiredAlliances = new Map();
 
@@ -472,6 +473,9 @@
       event.stopPropagation();
       if (!row.canAsk) return;
       if (sendAllianceExtension(row.recipientId, row.name, row.allianceId)) {
+        action.disabled = true;
+        action.textContent = "Pending";
+        action.style.cursor = "default";
         renderAlliancePanel();
       }
     });
@@ -677,7 +681,8 @@
     const panel = document.createElement("section");
     panel.id = PANEL_ID;
     panel.style.cssText =
-      "position:fixed;left:12px;bottom:12px;z-index:10028;width:min(248px,calc(100vw - 24px));" +
+      "position:fixed;left:12px;bottom:12px;z-index:" + PANEL_Z_INDEX + ";" +
+      "width:min(248px,calc(100vw - 24px));" +
       "background:rgba(9,14,24,0.94);border:1px solid rgba(148,163,184,0.22);" +
       "border-radius:10px;color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,0.34);" +
       "backdrop-filter:blur(3px);font-family:ui-sans-serif,system-ui,sans-serif;";
@@ -719,7 +724,8 @@
     toggle.id = TOGGLE_ID;
     toggle.textContent = "Alliances";
     toggle.style.cssText =
-      "position:fixed;left:12px;bottom:12px;z-index:10028;height:26px;padding:0 10px;" +
+      "position:fixed;left:12px;bottom:12px;z-index:" + PANEL_Z_INDEX + ";" +
+      "height:26px;padding:0 10px;" +
       "border-radius:8px;border:1px solid rgba(148,163,184,0.22);" +
       "background:rgba(9,14,24,0.94);color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,0.34);" +
       "backdrop-filter:blur(3px);font-size:11px;font-weight:700;cursor:pointer;display:none;";

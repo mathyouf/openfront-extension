@@ -14,9 +14,6 @@
       myClientID: null,
       playerTroopsById: {},
       clientIDToPlayerID: {},
-      mapWidth: 0,
-      mapHeight: 0,
-      myTilesSet: new Set(),
 
       // Pointer position for hover-driven shortcuts
       lastMouseX: window.innerWidth / 2,

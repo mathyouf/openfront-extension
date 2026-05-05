@@ -8,6 +8,7 @@
 
   const ROOT_ID = "ofe-extension-settings-root";
   const TAB_BUTTON_ID = "ofe-extension-settings-tab";
+  const MOBILE_TAB_ROW_ID = "ofe-extension-settings-mobile-tabs";
   const SECTION_TITLE = "OpenFront Enhanced";
   const DEFAULT_HOST_ATTR = "data-ofe-default-settings-host";
   const PREVIEW_ICON_SVG =
@@ -16,9 +17,16 @@
     "</svg>";
   const HOST_TAB_INACTIVE_CLASS =
     "px-6 py-2 text-xs font-bold transition-all duration-200 rounded-lg uppercase tracking-widest text-white/40 hover:text-white hover:bg-white/5 border border-transparent";
+  const TAB_ACTIVE_CLASS =
+    "bg-malibu-blue/20 text-aquarius border border-malibu-blue/30 shadow-[var(--shadow-malibu-blue)]";
+  const TAB_INACTIVE_CLASS =
+    "text-white/40 hover:text-white hover:bg-white/5 border border-transparent";
 
   function formatCodeForDisplay(code) {
     if (!code || code === "Null") return "";
+    if (code.startsWith("Shift+")) {
+      return `Shift+${formatCodeForDisplay(code.slice(6))}`;
+    }
     if (code.startsWith("Key")) return code.slice(3);
     if (code.startsWith("Digit")) return code.slice(5);
     return code;
@@ -89,7 +97,8 @@
   }
 
   function validateExtensionBinding(action, code) {
-    if (!code || code === "Null") return [];
+    const value = fn.normalizeKeybindValue ? fn.normalizeKeybindValue(code) : code;
+    if (!value || value === "Null") return [];
 
     const gameBindings = fn.getEffectiveGameKeybinds
       ? fn.getEffectiveGameKeybinds()
@@ -101,14 +110,20 @@
     const conflicts = [];
 
     for (const [gameAction, gameCode] of Object.entries(gameBindings)) {
-      if (gameCode === code) {
+      const normalizedGameCode = fn.normalizeKeybindValue
+        ? fn.normalizeKeybindValue(gameCode)
+        : gameCode;
+      if (normalizedGameCode === value) {
         conflicts.push(`game:${gameAction}`);
       }
     }
 
     for (const [otherAction, otherCode] of Object.entries(extBindings)) {
       if (otherAction === action) continue;
-      if (otherCode === code) {
+      const normalizedOtherCode = fn.normalizeKeybindValue
+        ? fn.normalizeKeybindValue(otherCode)
+        : otherCode;
+      if (normalizedOtherCode === value) {
         const label = constants.EXT_SHORTCUTS[otherAction]
           ? constants.EXT_SHORTCUTS[otherAction].label
           : otherAction;
@@ -121,7 +136,8 @@
 
   function syncSettingElementValue(el, action) {
     const entry = extensionBindingEntry(action);
-    const code = getCurrentCode(action);
+    const rawCode = getCurrentCode(action);
+    const code = fn.normalizeKeybindValue ? fn.normalizeKeybindValue(rawCode) : rawCode;
     el.value = code === "Null" ? "" : code;
     el.display = entry && entry.key ? entry.key : formatCodeForDisplay(code);
     el.requestUpdate();
@@ -219,7 +235,7 @@
     preview.title = `Preview ${meta.label}`;
     preview.setAttribute("aria-label", `Preview ${meta.label}`);
     preview.className =
-      "inline-flex h-9 w-9 items-center justify-center text-blue-100 transition-all duration-200 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-400/30";
+      "inline-flex h-9 w-9 items-center justify-center text-aquarius transition-all duration-200 rounded-lg bg-malibu-blue/15 hover:bg-malibu-blue/25 border border-malibu-blue/30";
     preview.addEventListener("click", onSoundPreviewClick);
 
     const toggleWrap = document.createElement("label");
@@ -235,7 +251,7 @@
 
     const slider = document.createElement("span");
     slider.className =
-      "absolute inset-0 bg-black/60 border border-white/10 transition-all duration-300 rounded-full before:absolute before:content-[''] before:h-5 before:w-5 before:left-[3px] before:top-[3px] before:bg-white/40 before:transition-all before:duration-300 before:rounded-full before:shadow-sm hover:before:bg-white/60 peer-checked:bg-blue-600 peer-checked:border-blue-500 peer-checked:before:translate-x-[24px] peer-checked:before:bg-white";
+      "absolute inset-0 bg-black/60 border border-white/10 transition-all duration-300 rounded-full before:absolute before:content-[''] before:h-5 before:w-5 before:left-[3px] before:top-[3px] before:bg-white/40 before:transition-all before:duration-300 before:rounded-full before:shadow-sm hover:before:bg-white/60 peer-checked:bg-malibu-blue peer-checked:border-malibu-blue peer-checked:before:translate-x-[24px] peer-checked:before:bg-white";
 
     toggleWrap.appendChild(toggle);
     toggleWrap.appendChild(slider);
@@ -252,7 +268,7 @@
     const keybindHeading = document.createElement("h2");
     keybindHeading.textContent = "Extension Keybinds";
     keybindHeading.className =
-      "text-blue-200 text-xl font-bold mt-8 mb-3 border-b border-white/10 pb-2";
+      "text-aquarius text-xl font-bold mt-8 mb-3 border-b border-white/10 pb-2";
     root.appendChild(keybindHeading);
 
     for (const [action, meta] of Object.entries(constants.EXT_SHORTCUTS)) {
@@ -273,20 +289,14 @@
     const heading = document.createElement("h2");
     heading.textContent = SECTION_TITLE;
     heading.className =
-      "text-blue-200 text-xl font-bold mt-4 mb-3 border-b border-white/10 pb-2";
-
-    const helper = document.createElement("p");
-    helper.className = "text-white/60 text-xs mb-3";
-    helper.textContent =
-      "Each sound has its own toggle and preview icon here. Extension keybinds are listed at the bottom of this tab.";
+      "text-aquarius text-xl font-bold mt-4 mb-3 border-b border-white/10 pb-2";
 
     const soundHeading = document.createElement("h2");
     soundHeading.textContent = "Extension Sounds";
     soundHeading.className =
-      "text-blue-200 text-xl font-bold mt-2 mb-3 border-b border-white/10 pb-2";
+      "text-aquarius text-xl font-bold mt-2 mb-3 border-b border-white/10 pb-2";
 
     root.appendChild(heading);
-    root.appendChild(helper);
     root.appendChild(soundHeading);
 
     for (const [key, meta] of Object.entries(constants.EXT_SOUND_SETTINGS)) {
@@ -313,9 +323,15 @@
     if (!button) return;
     button.className = [
       "px-6 py-2 text-xs font-bold transition-all duration-200 rounded-lg uppercase tracking-widest",
-      active
-        ? "bg-blue-500/20 text-blue-400 border border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.2)]"
-        : "text-white/40 hover:text-white hover:bg-white/5 border border-transparent",
+      active ? TAB_ACTIVE_CLASS : TAB_INACTIVE_CLASS,
+    ].join(" ");
+  }
+
+  function updateMobileTabButtonState(button, active) {
+    if (!button) return;
+    button.className = [
+      "flex-1 px-4 py-2 text-xs font-bold transition-all duration-200 rounded-lg uppercase tracking-widest",
+      active ? TAB_ACTIVE_CLASS : TAB_INACTIVE_CLASS,
     ].join(" ");
   }
 
@@ -368,6 +384,51 @@
     return button;
   }
 
+  function ensureMobileTabRow(ctx) {
+    let row = document.getElementById(MOBILE_TAB_ROW_ID);
+    if (!row) {
+      row = document.createElement("div");
+      row.id = MOBILE_TAB_ROW_ID;
+      row.className = "lg:hidden flex items-center gap-2 mb-4";
+
+      const gameButton = document.createElement("button");
+      gameButton.type = "button";
+      gameButton.dataset.ofeMobileSettingsTab = "game";
+      gameButton.textContent = "Game";
+      gameButton.addEventListener("click", () => {
+        state.extensionSettingsTabActive = false;
+        applyExtensionTabState();
+      });
+
+      const extensionButton = document.createElement("button");
+      extensionButton.type = "button";
+      extensionButton.dataset.ofeMobileSettingsTab = "extension";
+      extensionButton.textContent = "Extension";
+      extensionButton.addEventListener("click", () => {
+        state.extensionSettingsTabActive = true;
+        applyExtensionTabState();
+      });
+
+      row.appendChild(gameButton);
+      row.appendChild(extensionButton);
+    }
+
+    if (row.parentElement !== ctx.scroll) {
+      ctx.scroll.insertBefore(row, ctx.defaultContent);
+    }
+
+    const active = Boolean(state.extensionSettingsTabActive);
+    updateMobileTabButtonState(
+      row.querySelector('[data-ofe-mobile-settings-tab="game"]'),
+      !active,
+    );
+    updateMobileTabButtonState(
+      row.querySelector('[data-ofe-mobile-settings-tab="extension"]'),
+      active,
+    );
+    return row;
+  }
+
   function syncExtensionKeybindRows(root) {
     for (const action of Object.keys(constants.EXT_SHORTCUTS)) {
       const el = root.querySelector(`setting-keybind[action="ofe.${action}"]`);
@@ -385,6 +446,7 @@
 
     const root = ensureExtensionRoot(ctx.scroll);
     ensureTabButton(ctx);
+    ensureMobileTabRow(ctx);
     syncExtensionKeybindRows(root);
     syncHostTabButtonState(ctx);
 

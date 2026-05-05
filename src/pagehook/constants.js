@@ -38,12 +38,6 @@
       desc: "Emoji selector + search",
       defaultCode: "KeyX",
     },
-    allianceRequest: {
-      action: "allianceRequest",
-      label: "Alliance Request",
-      desc: "Send alliance request to hovered player",
-      defaultCode: "KeyV",
-    },
     boatOnePercent: {
       action: "boatOnePercent",
       label: "Boat 1%",
@@ -54,7 +48,7 @@
       action: "territoryCycle",
       label: "Cycle Mini",
       desc: "Jump camera between disconnected mini territories (100 tiles or fewer)",
-      defaultCode: "KeyL",
+      defaultCode: "KeyH",
     },
     lastOfeAlert: {
       action: "lastOfeAlert",

@@ -29,9 +29,9 @@ All shortcuts are rebindable in the extension's `Extension` settings tab.
 |---|---|---|
 | `Z` | Chat Search | Opens chat directed at the hovered player with search |
 | `X` | Emoji Search | Opens emoji selector with keyword search |
-| `V` | Alliance Request | Sends an alliance request to the hovered player |
 | `N` | Boat 1% | Sends a boat attack using only 1% of your troops |
-| `L` | Mini Territories | Jumps camera between your disconnected mini territories (100 tiles or fewer) |
+| `H` | Mini Territories | Jumps camera between your disconnected mini territories (100 tiles or fewer) |
+| `J` | Last OFE Alert | Jumps to the most recent clickable OFE alert |
 
 ### Neighbor alerts
 Notifications appear in the bottom-right when a neighboring player:

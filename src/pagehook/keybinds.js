@@ -17,6 +17,7 @@
     const isMac = /Mac/.test(navigator.userAgent);
     return {
       toggleView: "Space",
+      coordinateGrid: "KeyM",
       centerCamera: "KeyC",
       moveUp: "KeyW",
       moveDown: "KeyS",
@@ -28,9 +29,12 @@
       attackRatioUp: "KeyY",
       boatAttack: "KeyB",
       groundAttack: "KeyG",
+      requestAlliance: "KeyK",
+      breakAlliance: "KeyL",
       swapDirection: "KeyU",
       modifierKey: isMac ? "MetaLeft" : "ControlLeft",
       altKey: "AltLeft",
+      shiftKey: "ShiftLeft",
       buildCity: "Digit1",
       buildFactory: "Digit2",
       buildPort: "Digit3",
@@ -42,6 +46,10 @@
       buildHydrogenBomb: "Digit9",
       buildMIRV: "Digit0",
       resetGfx: "KeyR",
+      selectAllWarships: "KeyF",
+      pauseGame: "KeyP",
+      gameSpeedUp: "Period",
+      gameSpeedDown: "Comma",
     };
   }
 
@@ -183,12 +191,46 @@
     localStorage.setItem(EXT_SETTINGS_STORAGE_KEY, JSON.stringify(raw));
   }
 
+  function normalizeKeybindValue(value) {
+    if (typeof value !== "string" || !value || value === "Null") return value;
+    if (value.startsWith("Shift+")) {
+      const code = value.slice(6);
+      return code && code !== "Null" ? `Shift+${code}` : code;
+    }
+    return value;
+  }
+
+  function parseKeybindValue(value) {
+    const normalized = normalizeKeybindValue(value);
+    if (typeof normalized === "string" && normalized.startsWith("Shift+")) {
+      return { code: normalized.slice(6), shift: true, value: normalized };
+    }
+    return { code: normalized, shift: false, value: normalized };
+  }
+
+  function getShortcutEventKey(event) {
+    if (!event || typeof event.code !== "string") return "";
+    return event.shiftKey ? `Shift+${event.code}` : event.code;
+  }
+
+  function keybindMatchesEvent(event, value) {
+    const parsed = parseKeybindValue(value);
+    return Boolean(
+      parsed.code &&
+      parsed.code !== "Null" &&
+      event &&
+      event.code === parsed.code &&
+      Boolean(event.shiftKey) === parsed.shift,
+    );
+  }
+
   function codeToActionsMap(bindings) {
     const map = {};
     for (const [action, code] of Object.entries(bindings)) {
-      if (!code || code === "Null") continue;
-      if (!map[code]) map[code] = [];
-      map[code].push(action);
+      const normalized = normalizeKeybindValue(code);
+      if (!normalized || normalized === "Null") continue;
+      if (!map[normalized]) map[normalized] = [];
+      map[normalized].push(action);
     }
     return map;
   }
@@ -204,7 +246,7 @@
     const byCode = {};
 
     for (const [action, meta] of Object.entries(constants.EXT_SHORTCUTS)) {
-      const code = ext[action];
+      const code = normalizeKeybindValue(ext[action]);
       const gameConflicts = ((code && gameByCode[code]) || []).map((id) => ({
         scope: "game",
         id,
@@ -263,9 +305,19 @@
     return getEffectiveExtensionBindings()[action] || null;
   };
 
+  fn.normalizeKeybindValue = normalizeKeybindValue;
+  fn.getShortcutEventKey = getShortcutEventKey;
+  fn.keybindMatchesEvent = keybindMatchesEvent;
+
   fn.getShortcutActionByCode = (code) => {
     const diagnostics = getShortcutDiagnostics();
-    const diag = diagnostics.byCode[code];
+    const diag = diagnostics.byCode[normalizeKeybindValue(code)];
+    return diag ? diag.action : null;
+  };
+
+  fn.getShortcutActionForEvent = (event) => {
+    const diagnostics = getShortcutDiagnostics();
+    const diag = diagnostics.byCode[getShortcutEventKey(event)];
     return diag ? diag.action : null;
   };
 
@@ -277,13 +329,19 @@
 
   fn.isShortcutCodeReady = (code) => {
     const diagnostics = getShortcutDiagnostics();
-    const diag = diagnostics.byCode[code];
+    const diag = diagnostics.byCode[normalizeKeybindValue(code)];
+    return !!diag && diag.ready;
+  };
+
+  fn.isShortcutEventReady = (event) => {
+    const diagnostics = getShortcutDiagnostics();
+    const diag = diagnostics.byCode[getShortcutEventKey(event)];
     return !!diag && diag.ready;
   };
 
   fn.getShortcutConflictSummary = (code) => {
     const diagnostics = getShortcutDiagnostics();
-    const diag = diagnostics.byCode[code];
+    const diag = diagnostics.byCode[normalizeKeybindValue(code)];
     if (!diag || diag.ready) return null;
     return {
       label: diag.label,

@@ -23,6 +23,7 @@
       "js": [
         "src/pagehook/namespace.js",
         "src/pagehook/constants.js",
+        "src/pagehook/native-overrides.js",
         "src/pagehook/utils.js",
         "src/pagehook/keybinds.js",
         "src/pagehook/settings-ui.js",

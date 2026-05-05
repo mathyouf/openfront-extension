@@ -18,7 +18,6 @@
   const SHORT_LABELS = {
     chatSearch: "Chat",
     emojiSearch: "Emoji",
-    allianceRequest: "Alliance",
     boatOnePercent: "Boat 1%",
     territoryCycle: "Cycle Mini",
     lastOfeAlert: "Last Alert",

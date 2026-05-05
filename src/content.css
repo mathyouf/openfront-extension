@@ -7,3 +7,12 @@
 #ofe-dot-container div {
   will-change: left, top, opacity;
 }
+
+body > div[style*="position: fixed"][style*="left: 50%"][style*="top: 50%"][style*="z-index: 4"],
+body > div[style*="position: fixed"][style*="left:50%"][style*="top:50%"][style*="z-index:4"] {
+  display: none !important;
+}
+
+player-info-overlay div[translate="no"][class*="flex-1"][class*="flex-col"][class*="text-xs"][class*="font-bold"][class*="drop-shadow"] {
+  display: none !important;
+}
