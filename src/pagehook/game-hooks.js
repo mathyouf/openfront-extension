@@ -5,9 +5,19 @@
   if (!ns) return;
 
   const { state, constants, fn } = ns;
+  state.playerAliveById = state.playerAliveById || {};
   const BOAT_OVERRIDE_WINDOW_MS = 1500;
   const INBOUND_ATTACK_ALERT_COOLDOWN_TICKS = 100;
   const GROUND_ATTACK_ALERT_MIN_RATIO = 0.15;
+  const BUILDING_STACK_MIN_LEVEL = 10;
+  const STRUCTURE_UNIT_TYPES = new Set([
+    "City",
+    "Defense Post",
+    "SAM Launcher",
+    "Missile Silo",
+    "Port",
+    "Factory",
+  ]);
   let sharedAudioContext = null;
   let audioUnlocked = false;
   let audioUnlockInitialized = false;
@@ -15,8 +25,9 @@
   function writeGamePhaseAttribute(phase) {
     try {
       document.documentElement.setAttribute("data-ofe-game-phase", phase);
-      if (phase !== "spawn") {
+      if (phase === "none") {
         document.documentElement.removeAttribute("data-ofe-nations");
+        document.documentElement.removeAttribute("data-ofe-building-stacks");
       }
     } catch (_) {}
   }
@@ -1165,6 +1176,72 @@
 
   fn.navigateToPosition = navigateToPosition;
 
+  function publishNationMarkers(nameData) {
+    if (!nameData) return;
+
+    const nations = {};
+    for (const pid in nameData) {
+      if (state.playerTypeById[pid] !== "NATION") continue;
+      if (state.playerAliveById[pid] === false) continue;
+
+      const d = nameData[pid];
+      if (!d || !Number.isFinite(Number(d.x)) || !Number.isFinite(Number(d.y))) {
+        continue;
+      }
+      nations[pid] = { x: Number(d.x), y: Number(d.y) };
+    }
+
+    document.documentElement.setAttribute("data-ofe-nations", JSON.stringify(nations));
+  }
+
+  function publishBuildingStackMarkers() {
+    const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
+    if (
+      !game ||
+      typeof game.units !== "function" ||
+      typeof game.x !== "function" ||
+      typeof game.y !== "function"
+    ) {
+      return;
+    }
+
+    const stacks = {};
+    let units = [];
+    try {
+      units = game.units();
+    } catch (_) {
+      return;
+    }
+
+    for (const unit of units) {
+      try {
+        const type = typeof unit.type === "function" ? unit.type() : null;
+        if (!STRUCTURE_UNIT_TYPES.has(type)) continue;
+        if (typeof unit.isUnderConstruction === "function" && unit.isUnderConstruction()) {
+          continue;
+        }
+
+        const level = typeof unit.level === "function" ? Number(unit.level()) : NaN;
+        if (!Number.isFinite(level) || level <= BUILDING_STACK_MIN_LEVEL) continue;
+
+        const tile = typeof unit.tile === "function" ? unit.tile() : null;
+        const x = Number(game.x(tile));
+        const y = Number(game.y(tile));
+        const id = typeof unit.id === "function" ? Number(unit.id()) : null;
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(id)) {
+          continue;
+        }
+
+        stacks[id] = { x, y, level, type };
+      } catch (_) {}
+    }
+
+    document.documentElement.setAttribute(
+      "data-ofe-building-stacks",
+      JSON.stringify(stacks),
+    );
+  }
+
   function updateFromGameUpdate(gu) {
     if (!gu || typeof gu !== "object" || !gu.updates) {
       return;
@@ -1172,6 +1249,7 @@
 
     if (gu.tick != null && gu.tick <= 3) {
       for (const k in state.playerTypeById) delete state.playerTypeById[k];
+      for (const k in state.playerAliveById) delete state.playerAliveById[k];
       for (const k in state.playerTroopsById) delete state.playerTroopsById[k];
       for (const k in state.clientIDToPlayerID) delete state.clientIDToPlayerID[k];
       state.seenIncomingBoatUnitIds.clear();
@@ -1209,6 +1287,7 @@
         for (const entry of arr) {
           if (entry.id == null) continue;
           if (entry.playerType) state.playerTypeById[entry.id] = entry.playerType;
+          if (entry.isAlive != null) state.playerAliveById[entry.id] = Boolean(entry.isAlive);
           if (entry.troops != null) state.playerTroopsById[entry.id] = entry.troops;
           if (entry.clientID != null) {
             const smallID =
@@ -1242,16 +1321,8 @@
       }
     }
 
-    const nameData = gu.playerNameViewData;
-    if (nameData && state.gamePhase === "spawn") {
-      const nations = {};
-      for (const pid in nameData) {
-        if (state.playerTypeById[pid] !== "NATION") continue;
-        const d = nameData[pid];
-        nations[pid] = { x: d.x, y: d.y };
-      }
-      document.documentElement.setAttribute("data-ofe-nations", JSON.stringify(nations));
-    }
+    publishNationMarkers(gu.playerNameViewData);
+    publishBuildingStackMarkers();
 
   }
 

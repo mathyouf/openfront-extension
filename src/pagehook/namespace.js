@@ -10,6 +10,7 @@
     ns.state = {
       // Worker-derived runtime game state
       playerTypeById: {},
+      playerAliveById: {},
       myPlayerTroops: 0,
       myClientID: null,
       playerTroopsById: {},

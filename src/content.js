@@ -1,20 +1,20 @@
 /**
  * OpenFront Enhanced — Content Script (runs in ISOLATED world)
  *
- * During spawn phase: adds highly visible markers on every nation so you can
- * see them from any zoom level when picking a start location. Removed when
- * the game starts.
+ * Adds highly visible markers for nations and high-level building stacks so
+ * you can see them from any zoom level.
  *
  * Reads data from attributes on <html> set by page-hook.js (MAIN world):
  *   - data-ofe-game-phase: current game phase from the live GameView
- *   - data-ofe-nations: nation positions for spawn dots
+ *   - data-ofe-nations: nation positions
+ *   - data-ofe-building-stacks: high-level structure positions
  */
 
 "use strict";
 
 (() => {
   let watchInterval = null;
-  let spawnActive = false;
+  let markersActive = false;
   let dotContainer = null;
   let cachedNameLayerContainer = null;
   let gameDataObserver = null;
@@ -23,7 +23,7 @@
   const MARKER_TARGET_SCREEN_SIZE = 24;
   const MARKER_MIN_SCALE = 0.03;
   const MARKER_MAX_SCALE = 1.15;
-  const MARKER_SVG_DATA_URI =
+  const NATION_MARKER_SVG_DATA_URI =
     "data:image/svg+xml;utf8," +
     encodeURIComponent(
       "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>" +
@@ -33,14 +33,31 @@
         "<circle cx='50' cy='50' r='7' fill='#ef4444'/>" +
       "</svg>",
     );
+  const BUILDING_STACK_MARKER_SVG_DATA_URI =
+    "data:image/svg+xml;utf8," +
+    encodeURIComponent(
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>" +
+        "<path d='M50 7 93 50 50 93 7 50Z' fill='#111827' opacity='0.82'/>" +
+        "<path d='M50 15 85 50 50 85 15 50Z' fill='#fef3c7'/>" +
+        "<path d='M50 25 75 50 50 75 25 50Z' fill='#f59e0b'/>" +
+      "</svg>",
+    );
 
-  function getNationPositions() {
+  function readMarkerData(attributeName) {
     try {
-      const raw = document.documentElement.getAttribute("data-ofe-nations");
+      const raw = document.documentElement.getAttribute(attributeName);
       return raw ? JSON.parse(raw) : {};
     } catch {
       return {};
     }
+  }
+
+  function getNationPositions() {
+    return readMarkerData("data-ofe-nations");
+  }
+
+  function getBuildingStackPositions() {
+    return readMarkerData("data-ofe-building-stacks");
   }
 
   function getNameLayerContainer() {
@@ -101,8 +118,9 @@
     return 1;
   }
 
-  function isSpawnPhase() {
-    return document.documentElement.getAttribute("data-ofe-game-phase") === "spawn";
+  function hasActiveGamePhase() {
+    const phase = document.documentElement.getAttribute("data-ofe-game-phase");
+    return phase === "spawn" || phase === "playing";
   }
 
   function ensureDotContainer() {
@@ -122,7 +140,7 @@
   }
 
   function updateMarkerScale() {
-    if (!spawnActive || !dotContainer) return;
+    if (!markersActive || !dotContainer) return;
     const nameLayerContainer = getNameLayerContainer();
     if (!nameLayerContainer) return;
     const tf = nameLayerContainer.style.transform || getComputedStyle(nameLayerContainer).transform;
@@ -145,29 +163,70 @@
     }
   }
 
-  function getOrCreateMarker(markerId) {
-    let marker = markerById.get(markerId);
-    if (marker && dotContainer && dotContainer.contains(marker)) return marker;
+  function styleMarker(marker, kind) {
+    const image =
+      kind === "building-stack"
+        ? BUILDING_STACK_MARKER_SVG_DATA_URI
+        : NATION_MARKER_SVG_DATA_URI;
+    const shadow =
+      kind === "building-stack"
+        ? "drop-shadow(0 0 7px rgba(245,158,11,0.72))"
+        : "drop-shadow(0 0 6px rgba(239,68,68,0.55))";
 
-    marker = document.createElement("div");
-    marker.id = markerId;
     marker.style.cssText =
       "position:absolute;left:0;top:0;pointer-events:none;will-change:transform;" +
       `width:${MARKER_SIZE}px;height:${MARKER_SIZE}px;` +
+      "display:flex;align-items:center;justify-content:center;" +
       "background-repeat:no-repeat;background-size:contain;background-position:center;" +
-      "filter:drop-shadow(0 0 6px rgba(239,68,68,0.55));" +
-      `background-image:url(\"${MARKER_SVG_DATA_URI}\");`;
+      `filter:${shadow};` +
+      `background-image:url(\"${image}\");`;
+    marker.dataset.ofeMarkerKind = kind;
+  }
+
+  function getOrCreateMarker(markerId, kind) {
+    let marker = markerById.get(markerId);
+    if (marker && dotContainer && dotContainer.contains(marker)) {
+      if (marker.dataset.ofeMarkerKind !== kind) {
+        marker.textContent = "";
+        styleMarker(marker, kind);
+      }
+      return marker;
+    }
+
+    marker = document.createElement("div");
+    marker.id = markerId;
+    styleMarker(marker, kind);
 
     markerById.set(markerId, marker);
     dotContainer.appendChild(marker);
     return marker;
   }
 
-  function updateSpawnDots() {
-    if (!spawnActive) return;
+  function setBuildingStackLabel(marker, level) {
+    const text = Number.isFinite(Number(level)) ? String(Math.floor(Number(level))) : "";
+    if (!text) {
+      marker.textContent = "";
+      return;
+    }
+
+    let label = marker.querySelector("span");
+    if (!label) {
+      marker.textContent = "";
+      label = document.createElement("span");
+      label.style.cssText =
+        "display:block;min-width:0;max-width:18px;overflow:hidden;text-align:center;" +
+        "font:700 9px/1 Arial,sans-serif;color:#111827;text-shadow:0 1px 0 rgba(255,255,255,0.62);";
+      marker.appendChild(label);
+    }
+    label.textContent = text;
+  }
+
+  function updateMarkers() {
+    if (!markersActive) return;
     if (!ensureDotContainer()) return;
 
     const nations = getNationPositions();
+    const buildingStacks = getBuildingStackPositions();
     const usedDots = new Set();
 
     for (const pid in nations) {
@@ -176,8 +235,24 @@
         continue;
       }
 
-      const markerId = `ofe-dot-${pid}`;
-      const marker = getOrCreateMarker(markerId);
+      const markerId = `ofe-nation-${pid}`;
+      const marker = getOrCreateMarker(markerId, "nation");
+      marker.textContent = "";
+      marker.style.transform =
+        `translate(${pos.x}px, ${pos.y}px) translate(-50%, -50%) scale(var(--ofe-marker-scale))`;
+
+      usedDots.add(markerId);
+    }
+
+    for (const id in buildingStacks) {
+      const pos = buildingStacks[id];
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) {
+        continue;
+      }
+
+      const markerId = `ofe-building-stack-${id}`;
+      const marker = getOrCreateMarker(markerId, "building-stack");
+      setBuildingStackLabel(marker, pos.level);
       marker.style.transform =
         `translate(${pos.x}px, ${pos.y}px) translate(-50%, -50%) scale(var(--ofe-marker-scale))`;
 
@@ -198,28 +273,35 @@
       for (const mutation of mutations) {
         if (mutation.type !== "attributes") continue;
         if (mutation.attributeName === "data-ofe-game-phase") {
-          syncSpawnState();
+          syncMarkerState();
           return;
         }
-        if (mutation.attributeName === "data-ofe-nations") {
-          if (spawnActive) updateSpawnDots();
+        if (
+          mutation.attributeName === "data-ofe-nations" ||
+          mutation.attributeName === "data-ofe-building-stacks"
+        ) {
+          if (markersActive) updateMarkers();
           return;
         }
       }
     });
     gameDataObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-ofe-game-phase", "data-ofe-nations"],
+      attributeFilter: [
+        "data-ofe-game-phase",
+        "data-ofe-nations",
+        "data-ofe-building-stacks",
+      ],
     });
   }
 
-  function syncSpawnState() {
-    const spawning = isSpawnPhase();
-    if (spawning === spawnActive) return;
+  function syncMarkerState() {
+    const active = hasActiveGamePhase();
+    if (active === markersActive) return;
 
-    spawnActive = spawning;
-    if (spawnActive) {
-      updateSpawnDots();
+    markersActive = active;
+    if (markersActive) {
+      updateMarkers();
       updateMarkerScale();
       return;
     }
@@ -231,15 +313,15 @@
     if (watchInterval) return;
     initGameDataObserver();
     watchInterval = setInterval(() => {
-      syncSpawnState();
-      if (spawnActive) {
+      syncMarkerState();
+      if (markersActive) {
         if (!dotContainer || !document.contains(dotContainer)) {
-          updateSpawnDots();
+          updateMarkers();
         }
         updateMarkerScale();
       }
     }, 120);
-    syncSpawnState();
+    syncMarkerState();
   }
 
   function waitForCanvas() {

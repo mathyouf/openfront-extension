@@ -163,7 +163,11 @@
     let ofeIndex = 0;
 
     for (const row of rows) {
-      if (!isOfeRow(row)) continue;
+      if (!isOfeRow(row)) {
+        row.style.display = "";
+        bindOfeRowInteraction(row, null);
+        continue;
+      }
       const event = ofeEvents[ofeIndex++] || null;
       row.style.display = panelState.hidden ? "none" : "";
       bindOfeRowInteraction(row, event);
