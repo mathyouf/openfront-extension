@@ -55,7 +55,12 @@
 
   function findModalContext() {
     const modal = document.querySelector("user-setting");
-    if (!modal || !modal.isModalOpen) return null;
+    if (!modal) return null;
+    const isVisibleInlineSettings =
+      modal.inline === true &&
+      modal.offsetParent !== null &&
+      getComputedStyle(modal).display !== "none";
+    if (!modal.isModalOpen && !isVisibleInlineSettings) return null;
     const defaultContent = findCurrentSettingsContainer(modal);
     if (!defaultContent || !defaultContent.parentElement) return null;
 
