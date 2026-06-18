@@ -10,6 +10,7 @@
     ns.state = {
       // Worker-derived runtime game state
       playerTypeById: {},
+      playerTypeBySmallId: {},
       playerAliveById: {},
       myPlayerTroops: 0,
       myClientID: null,
@@ -73,6 +74,8 @@
 
       // Game phase tracking
       gamePhase: "none",
+      spawnPhaseTurns: null,
+      markerTransformWatch: null,
     };
   }
 

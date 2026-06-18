@@ -6,6 +6,8 @@
 
   const { state, constants, fn } = ns;
   state.playerAliveById = state.playerAliveById || {};
+  state.playerTypeBySmallId = state.playerTypeBySmallId || {};
+  state.spawnPhaseTurns = state.spawnPhaseTurns ?? null;
   const BOAT_OVERRIDE_WINDOW_MS = 1500;
   const INBOUND_ATTACK_ALERT_COOLDOWN_TICKS = 100;
   const GROUND_ATTACK_ALERT_MIN_RATIO = 0.15;
@@ -28,6 +30,7 @@
       if (phase === "none") {
         document.documentElement.removeAttribute("data-ofe-nations");
         document.documentElement.removeAttribute("data-ofe-building-stacks");
+        document.documentElement.removeAttribute("data-ofe-map-transform");
       }
     } catch (_) {}
   }
@@ -46,6 +49,102 @@
   }
 
   setGamePhase(state.gamePhase || "none");
+
+  function finiteNumberOrNull(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function cacheSpawnPhaseTurns(value) {
+    const turns = finiteNumberOrNull(value);
+    if (turns != null && turns >= 0) {
+      state.spawnPhaseTurns = turns;
+      return turns;
+    }
+    return null;
+  }
+
+  function readConfigValue(config, key) {
+    if (!config) return undefined;
+    const value = config[key];
+    if (typeof value === "function") {
+      try {
+        return value.call(config);
+      } catch (_) {
+        return undefined;
+      }
+    }
+    return value;
+  }
+
+  function readNestedGameConfig(config) {
+    const nestedConfig = readConfigValue(config, "gameConfig");
+    return nestedConfig && typeof nestedConfig === "object" ? nestedConfig : null;
+  }
+
+  function cacheSpawnPhaseTurnsFromConfig(config) {
+    if (!config) return null;
+
+    const directTurns = readConfigValue(config, "numSpawnPhaseTurns");
+    const cachedDirectTurns = cacheSpawnPhaseTurns(directTurns);
+    if (cachedDirectTurns != null) return cachedDirectTurns;
+
+    const nestedConfig = readNestedGameConfig(config);
+    const gameType =
+      readConfigValue(config, "gameType") ??
+      readConfigValue(nestedConfig, "gameType");
+    const randomSpawn =
+      readConfigValue(config, "randomSpawn") === true ||
+      readConfigValue(config, "isRandomSpawn") === true ||
+      readConfigValue(nestedConfig, "randomSpawn") === true ||
+      readConfigValue(nestedConfig, "isRandomSpawn") === true;
+    if (gameType === "Singleplayer") return cacheSpawnPhaseTurns(100);
+    if (randomSpawn) return cacheSpawnPhaseTurns(150);
+    if (typeof gameType === "string") return cacheSpawnPhaseTurns(300);
+
+    return null;
+  }
+
+  function cacheSpawnPhaseTurnsFromGameStartInfo(gameStartInfo) {
+    return cacheSpawnPhaseTurnsFromConfig(
+      gameStartInfo && (gameStartInfo.config || gameStartInfo.gameConfig),
+    );
+  }
+
+  function getSpawnPhaseTurns() {
+    const cachedTurns = finiteNumberOrNull(state.spawnPhaseTurns);
+    if (cachedTurns != null) return cachedTurns;
+
+    const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
+    const config =
+      game && typeof game.config === "function" ? game.config() : null;
+    return cacheSpawnPhaseTurnsFromConfig(config);
+  }
+
+  function syncGamePhaseFromUpdateTick(tick) {
+    const numericTick = finiteNumberOrNull(tick);
+    if (numericTick == null) return;
+
+    const spawnPhaseTurns = getSpawnPhaseTurns();
+    if (spawnPhaseTurns != null) {
+      setGamePhase(numericTick <= spawnPhaseTurns ? "spawn" : "playing");
+      return;
+    }
+
+    if (numericTick <= 3) {
+      setGamePhase("spawn");
+      return;
+    }
+
+    if (state.gamePhase !== "spawn") return;
+
+    const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
+    if (game && typeof game.inSpawnPhase === "function") {
+      try {
+        if (!game.inSpawnPhase()) setGamePhase("playing");
+      } catch (_) {}
+    }
+  }
 
   fn.onGamePhaseChange = (callback) => {
     if (typeof callback === "function") {
@@ -683,18 +782,23 @@
   }
 
   function isHostilePlayerSmallId(playerSmallId, myPID) {
+    const numericPlayerSmallId = Number(playerSmallId);
+    if (!Number.isFinite(numericPlayerSmallId) || numericPlayerSmallId <= 0) {
+      return false;
+    }
+
     const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
     if (
       !game ||
       typeof game.myPlayer !== "function" ||
       typeof game.playerBySmallID !== "function"
     ) {
-      return Number(playerSmallId) !== Number(myPID);
+      return numericPlayerSmallId !== Number(myPID);
     }
 
     try {
       const me = game.myPlayer();
-      const other = game.playerBySmallID(Number(playerSmallId));
+      const other = game.playerBySmallID(numericPlayerSmallId);
       if (
         !me ||
         !other ||
@@ -709,7 +813,61 @@
       return true;
     } catch (_) {}
 
-    return Number(playerSmallId) !== Number(myPID);
+    return numericPlayerSmallId !== Number(myPID);
+  }
+
+  function currentOrUpdateTick(game, fallbackTick) {
+    let tick = Number(fallbackTick);
+    if (!Number.isFinite(tick)) tick = 0;
+
+    if (game && typeof game.ticks === "function") {
+      try {
+        const currentTick = Number(game.ticks());
+        if (Number.isFinite(currentTick) && currentTick > tick) {
+          tick = currentTick;
+        }
+      } catch (_) {}
+    }
+
+    return tick;
+  }
+
+  function playerTypeBySmallId(playerSmallId, game = null) {
+    const numericPlayerSmallId = Number(playerSmallId);
+    if (!Number.isFinite(numericPlayerSmallId) || numericPlayerSmallId <= 0) {
+      return null;
+    }
+
+    const view = game || (fn.getAnyGameView ? fn.getAnyGameView() : null);
+    if (view && typeof view.playerBySmallID === "function") {
+      try {
+        const player = view.playerBySmallID(numericPlayerSmallId);
+        if (player && typeof player.type === "function") {
+          return player.type();
+        }
+      } catch (_) {}
+    }
+
+    return state.playerTypeBySmallId?.[numericPlayerSmallId] || null;
+  }
+
+  function isBotPlayerSmallId(playerSmallId, game = null) {
+    return playerTypeBySmallId(playerSmallId, game) === "BOT";
+  }
+
+  function isActiveInboundTransport(unit) {
+    if (!unit || typeof unit.isActive !== "function" || !unit.isActive()) {
+      return false;
+    }
+    if (typeof unit.type !== "function" || unit.type() !== "Transport") {
+      return false;
+    }
+    if (typeof unit.retreating === "function") {
+      try {
+        if (unit.retreating()) return false;
+      } catch (_) {}
+    }
+    return true;
   }
 
   function scheduleBoatInboundAlert(unitIds, myPID, tick) {
@@ -731,21 +889,26 @@
       if (!me || (typeof me.isAlive === "function" && !me.isAlive())) {
         return;
       }
+      const alertTick = currentOrUpdateTick(game, tick);
+      if (state.lastBoatInboundSoundTick === alertTick) return;
 
-      pruneAlertCooldownMap(state.boatInboundAlertTickByAttacker, tick);
+      pruneAlertCooldownMap(state.boatInboundAlertTickByAttacker, alertTick);
 
       const eligibleBoatInboundAlertKeys = new Set();
+      let alertUnitID = null;
       for (const unitId of unitIds) {
         const numericId = Number(unitId);
         if (!Number.isFinite(numericId)) continue;
 
         let owner = null;
+        let unit = null;
         try {
-          const unit = game.unit(numericId);
+          unit = game.unit(numericId);
           owner = unit && typeof unit.owner === "function" ? unit.owner() : null;
         } catch (_) {
           owner = null;
         }
+        if (!isActiveInboundTransport(unit)) continue;
         if (!owner || typeof owner.smallID !== "function") continue;
 
         const attackerSmallId = Number(owner.smallID());
@@ -757,25 +920,123 @@
           inboundAlertAllowed(
             state.boatInboundAlertTickByAttacker,
             attackerKey,
-            tick,
+            alertTick,
           )
         ) {
           eligibleBoatInboundAlertKeys.add(attackerKey);
+          if (alertUnitID == null) {
+            alertUnitID = numericId;
+          }
         }
       }
 
       if (!eligibleBoatInboundAlertKeys.size) return;
 
-      state.lastBoatInboundSoundTick = tick;
+      state.lastBoatInboundSoundTick = alertTick;
       markInboundAlertTick(
         state.boatInboundAlertTickByAttacker,
         eligibleBoatInboundAlertKeys,
-        tick,
+        alertTick,
       );
       pushSoundFeedEvent("Enemy boat inbound", {
-        unitID: unitIds[0],
+        unitID: alertUnitID,
       });
       playBoatInboundAlert();
+    }, 0);
+  }
+
+  function scheduleGroundAttackInboundAlert(attacks, myPID, tick) {
+    if (!Array.isArray(attacks) || !attacks.length) return;
+
+    window.setTimeout(() => {
+      const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
+      if (!game || typeof game.myPlayer !== "function") {
+        return;
+      }
+
+      const me = game.myPlayer();
+      if (!me || (typeof me.isAlive === "function" && !me.isAlive())) {
+        return;
+      }
+
+      const alertTick = currentOrUpdateTick(game, tick);
+      if (state.lastGroundAttackInboundSoundTick === alertTick) return;
+
+      let currentIncomingAttacks = [];
+      if (typeof me.incomingAttacks === "function") {
+        try {
+          currentIncomingAttacks = me.incomingAttacks();
+        } catch (_) {
+          currentIncomingAttacks = [];
+        }
+      }
+      if (!Array.isArray(currentIncomingAttacks) || !currentIncomingAttacks.length) {
+        return;
+      }
+
+      const pendingAttackIds = new Set();
+      for (const attack of attacks) {
+        if (attack && attack.id != null) {
+          pendingAttackIds.add(String(attack.id));
+        }
+      }
+      if (!pendingAttackIds.size) return;
+
+      const myTroopsNow =
+        typeof me.troops === "function" ? Number(me.troops()) : Number(state.myPlayerTroops);
+      const minAlertTroops = Number.isFinite(myTroopsNow) && myTroopsNow > 0
+        ? myTroopsNow * GROUND_ATTACK_ALERT_MIN_RATIO
+        : NaN;
+      if (!Number.isFinite(minAlertTroops)) return;
+
+      pruneAlertCooldownMap(state.groundAttackInboundAlertTickByAttacker, alertTick);
+
+      const eligibleGroundInboundAlertKeys = new Set();
+      let groundAttackFocusID = null;
+      for (const attack of currentIncomingAttacks) {
+        if (!attack || attack.retreating || attack.id == null) continue;
+        if (!pendingAttackIds.has(String(attack.id))) continue;
+
+        const attackTroops = Number(attack.troops);
+        const attackerSmallId = Number(attack.attackerID);
+        if (
+          !Number.isFinite(attackerSmallId) ||
+          attackerSmallId <= 0 ||
+          isBotPlayerSmallId(attackerSmallId, game)
+        ) {
+          continue;
+        }
+
+        const attackerKey = `player:${attackerSmallId}`;
+        if (
+          Number.isFinite(attackTroops) &&
+          attackTroops >= minAlertTroops &&
+          isHostilePlayerSmallId(attackerSmallId, myPID) &&
+          inboundAlertAllowed(
+            state.groundAttackInboundAlertTickByAttacker,
+            attackerKey,
+            alertTick,
+          )
+        ) {
+          eligibleGroundInboundAlertKeys.add(attackerKey);
+          if (groundAttackFocusID == null) {
+            groundAttackFocusID = attackerSmallId;
+          }
+        }
+      }
+
+      if (!eligibleGroundInboundAlertKeys.size) return;
+
+      state.lastGroundAttackInboundSoundTick = alertTick;
+      markInboundAlertTick(
+        state.groundAttackInboundAlertTickByAttacker,
+        eligibleGroundInboundAlertKeys,
+        alertTick,
+      );
+      pushSoundFeedEvent("Ground attack inbound", {
+        focusID: groundAttackFocusID,
+      });
+      playGroundAttackInboundAlert();
     }, 0);
   }
 
@@ -808,8 +1069,7 @@
     const mirvInboundUnitIds = [];
     const nukeInboundUnitIds = [];
     const hydrogenInboundUnitIds = [];
-    const eligibleGroundInboundAlertKeys = new Set();
-    let groundAttackFocusID = null;
+    const groundAttackInboundCandidates = [];
 
     pruneAlertCooldownMap(state.boatInboundAlertTickByAttacker, gu.tick);
     pruneAlertCooldownMap(state.groundAttackInboundAlertTickByAttacker, gu.tick);
@@ -867,31 +1127,7 @@
           !state.seenIncomingGroundAttackIds.has(attackId)
         ) {
           groundAttackInboundEvents += 1;
-          const myTroopsNow = Number(
-            entry.troops != null ? entry.troops : state.myPlayerTroops,
-          );
-          const attackTroops = Number(attack.troops);
-          const minAlertTroops = Number.isFinite(myTroopsNow) && myTroopsNow > 0
-            ? myTroopsNow * GROUND_ATTACK_ALERT_MIN_RATIO
-            : NaN;
-          const attackerSmallId = Number(attack.attackerID);
-          const attackerKey = `player:${attackerSmallId}`;
-          if (
-            Number.isFinite(attackTroops) &&
-            Number.isFinite(minAlertTroops) &&
-            attackTroops >= minAlertTroops &&
-            isHostilePlayerSmallId(attackerSmallId, myPID) &&
-            inboundAlertAllowed(
-              state.groundAttackInboundAlertTickByAttacker,
-              attackerKey,
-              gu.tick,
-            )
-          ) {
-            eligibleGroundInboundAlertKeys.add(attackerKey);
-            if (groundAttackFocusID == null) {
-              groundAttackFocusID = attackerSmallId;
-            }
-          }
+          groundAttackInboundCandidates.push({ id: attackId });
         }
       }
       nextIncomingGroundAttackIds = activeIds;
@@ -1001,19 +1237,9 @@
 
     if (
       groundAttackInboundEvents > 0 &&
-      eligibleGroundInboundAlertKeys.size > 0 &&
       gu.tick !== state.lastGroundAttackInboundSoundTick
     ) {
-      state.lastGroundAttackInboundSoundTick = gu.tick;
-      markInboundAlertTick(
-        state.groundAttackInboundAlertTickByAttacker,
-        eligibleGroundInboundAlertKeys,
-        gu.tick,
-      );
-      pushSoundFeedEvent("Ground attack inbound", {
-        focusID: groundAttackFocusID,
-      });
-      playGroundAttackInboundAlert();
+      scheduleGroundAttackInboundAlert(groundAttackInboundCandidates, myPID, gu.tick);
     }
 
     if (
@@ -1176,14 +1402,87 @@
 
   fn.navigateToPosition = navigateToPosition;
 
+  function publishMarkerTransform() {
+    const buildMenu = document.querySelector("build-menu");
+    const transformHandler = buildMenu && buildMenu.transformHandler;
+    if (
+      !transformHandler ||
+      typeof transformHandler.worldToScreenCoordinates !== "function"
+    ) {
+      return;
+    }
+
+    try {
+      const origin = transformHandler.worldToScreenCoordinates({ x: 0, y: 0 });
+      const scale = Number(transformHandler.scale);
+      if (
+        !origin ||
+        !Number.isFinite(Number(origin.x)) ||
+        !Number.isFinite(Number(origin.y)) ||
+        !Number.isFinite(scale) ||
+        scale <= 0
+      ) {
+        return;
+      }
+
+      document.documentElement.setAttribute(
+        "data-ofe-map-transform",
+        JSON.stringify({
+          x: Number(origin.x) - window.innerWidth / 2,
+          y: Number(origin.y) - window.innerHeight / 2,
+          scale,
+        }),
+      );
+    } catch (_) {}
+  }
+
   function publishNationMarkers(nameData) {
+    const nations = {};
+    const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
+
+    if (game && typeof game.playerViews === "function") {
+      try {
+        for (const player of game.playerViews()) {
+          if (!player || typeof player.type !== "function" || player.type() !== "NATION") {
+            continue;
+          }
+          if (typeof player.isAlive === "function" && !player.isAlive()) {
+            continue;
+          }
+          if (typeof player.nameLocation !== "function") {
+            continue;
+          }
+
+          const location = player.nameLocation();
+          if (
+            !location ||
+            !Number.isFinite(Number(location.x)) ||
+            !Number.isFinite(Number(location.y))
+          ) {
+            continue;
+          }
+
+          const markerId =
+            typeof player.smallID === "function" ? player.smallID() :
+            typeof player.id === "function" ? player.id() :
+            null;
+          if (markerId == null) continue;
+
+          nations[markerId] = { x: Number(location.x), y: Number(location.y) };
+        }
+
+        if (Object.keys(nations).length > 0) {
+          document.documentElement.setAttribute("data-ofe-nations", JSON.stringify(nations));
+          return;
+        }
+      } catch (_) {}
+    }
+
     if (!nameData) return;
 
-    const nations = {};
     for (const pid in nameData) {
       if (state.playerTypeById[pid] !== "NATION") continue;
       if (state.playerAliveById[pid] === false) continue;
-
       const d = nameData[pid];
       if (!d || !Number.isFinite(Number(d.x)) || !Number.isFinite(Number(d.y))) {
         continue;
@@ -1249,6 +1548,7 @@
 
     if (gu.tick != null && gu.tick <= 3) {
       for (const k in state.playerTypeById) delete state.playerTypeById[k];
+      for (const k in state.playerTypeBySmallId) delete state.playerTypeBySmallId[k];
       for (const k in state.playerAliveById) delete state.playerAliveById[k];
       for (const k in state.playerTroopsById) delete state.playerTroopsById[k];
       for (const k in state.clientIDToPlayerID) delete state.clientIDToPlayerID[k];
@@ -1269,15 +1569,9 @@
       if (state.allianceExtensionPendingById instanceof Map) {
         state.allianceExtensionPendingById.clear();
       }
-      setGamePhase("spawn");
     }
 
-    if (state.gamePhase === "spawn") {
-      const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
-      if (game && typeof game.inSpawnPhase === "function" && !game.inSpawnPhase()) {
-        setGamePhase("playing");
-      }
-    }
+    syncGamePhaseFromUpdateTick(gu.tick);
 
     const updates = gu.updates;
     if (updates) {
@@ -1287,6 +1581,12 @@
         for (const entry of arr) {
           if (entry.id == null) continue;
           if (entry.playerType) state.playerTypeById[entry.id] = entry.playerType;
+          if (entry.playerType && entry.smallID != null) {
+            const smallID = Number(entry.smallID);
+            if (Number.isFinite(smallID)) {
+              state.playerTypeBySmallId[smallID] = entry.playerType;
+            }
+          }
           if (entry.isAlive != null) state.playerAliveById[entry.id] = Boolean(entry.isAlive);
           if (entry.troops != null) state.playerTroopsById[entry.id] = entry.troops;
           if (entry.clientID != null) {
@@ -1323,6 +1623,7 @@
 
     publishNationMarkers(gu.playerNameViewData);
     publishBuildingStackMarkers();
+    publishMarkerTransform();
 
   }
 
@@ -1498,6 +1799,8 @@
       try {
         if (msg && msg.type === "init") {
           setGamePhase("none");
+          state.spawnPhaseTurns = null;
+          cacheSpawnPhaseTurnsFromGameStartInfo(msg.gameStartInfo);
           if (msg.clientID) {
             state.myClientID = msg.clientID;
           }
@@ -1506,6 +1809,14 @@
 
       return origPostMessage.call(this, msg, ...rest);
     };
+
+    if (!state.markerTransformWatch) {
+      state.markerTransformWatch = window.setInterval(() => {
+        if (state.gamePhase === "spawn" || state.gamePhase === "playing") {
+          publishMarkerTransform();
+        }
+      }, 120);
+    }
   };
 
   fn.triggerBoatOnePercentAttack = () => {
