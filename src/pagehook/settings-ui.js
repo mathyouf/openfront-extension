@@ -9,6 +9,7 @@
   const ROOT_ID = "ofe-extension-settings-root";
   const TAB_BUTTON_ID = "ofe-extension-settings-tab";
   const MOBILE_TAB_ROW_ID = "ofe-extension-settings-mobile-tabs";
+  const EXTENSION_TAB_KEY = "ofe-extension";
   const SECTION_TITLE = "OpenFront Enhanced";
   const DEFAULT_HOST_ATTR = "data-ofe-default-settings-host";
   const PREVIEW_ICON_SVG =
@@ -319,9 +320,56 @@
       root.className = "flex flex-col gap-2";
       buildExtensionTabContent(root);
       fn.installOverlayInteractionGuards?.(root);
+      if (scroll) scroll.appendChild(root);
+    } else if (scroll && root.parentElement !== scroll) {
       scroll.appendChild(root);
     }
     return root;
+  }
+
+  function patchUserSettingModal(modal) {
+    if (!modal || modal.__ofeSettingsPatched) return Boolean(modal?.__ofeSettingsPatched);
+    if (
+      typeof modal.modalConfig !== "function" ||
+      typeof modal.renderBody !== "function"
+    ) {
+      return false;
+    }
+
+    const originalModalConfig = modal.modalConfig;
+    const originalRenderBody = modal.renderBody;
+
+    modal.modalConfig = function (...args) {
+      const config = originalModalConfig.apply(this, args) || {};
+      const tabs = Array.isArray(config.tabs) ? config.tabs : [];
+      if (tabs.some((tab) => tab && tab.key === EXTENSION_TAB_KEY)) {
+        return config;
+      }
+      return {
+        ...config,
+        tabs: [
+          ...tabs,
+          { key: EXTENSION_TAB_KEY, label: "Extension" },
+        ],
+      };
+    };
+
+    modal.renderBody = function (tab, ...args) {
+      if (tab === EXTENSION_TAB_KEY) {
+        const root = ensureExtensionRoot(null);
+        root.style.display = "";
+        root.className = "flex flex-col gap-2 p-4 lg:p-[1.4rem]";
+        syncExtensionKeybindRows(root);
+        return root;
+      }
+      return originalRenderBody.call(this, tab, ...args);
+    };
+
+    modal.__ofeSettingsPatched = true;
+    if (typeof modal.requestUpdate === "function") {
+      modal.requestUpdate();
+    }
+    return true;
   }
 
   function updateTabButtonState(button, active) {
@@ -461,6 +509,9 @@
   }
 
   function ensureSettingsSection() {
+    const modal = document.querySelector("user-setting");
+    if (patchUserSettingModal(modal)) return;
+
     const ctx = findModalContext();
     if (!ctx) return;
 
