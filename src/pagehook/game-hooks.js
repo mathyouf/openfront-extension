@@ -1546,7 +1546,10 @@
       return;
     }
 
-    if (gu.tick != null && gu.tick <= 3) {
+    // Reset once at the start of a game. Player updates are partial after their
+    // first emission, so clearing this state again on ticks 2 and 3 loses the
+    // clientID-to-playerID mapping needed by inbound alerts.
+    if (gu.tick != null && gu.tick <= 3 && state.gamePhase === "none") {
       for (const k in state.playerTypeById) delete state.playerTypeById[k];
       for (const k in state.playerTypeBySmallId) delete state.playerTypeBySmallId[k];
       for (const k in state.playerAliveById) delete state.playerAliveById[k];
