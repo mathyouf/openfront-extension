@@ -18,8 +18,10 @@ Chrome extension that adds quality-of-life improvements to [openfront.io](https:
 - **Neighbor alerts** — Sleeping neighbors and traitor neighbors each have their own sound and setting.
 - **Missile alerts** — Separate alarms play for atom bombs, hydrogen bombs, and MIRVs.
 
-### Troop graph
-A draggable top-right panel (toggle with `I`) that turns your troop counter into a trajectory:
+### Troop graph & advisor
+A draggable top-right panel (toggle with `I`) that turns your troop counter into a trajectory, with a build advisor grounded in the game's real formulas:
+- **42% cue** — troop growth peaks at ~42% of cap; the advisor tells you when spending is nearly free (above the peak, with the free-spend amount) or expensive (below it).
+- **Build what-ifs** — live prices (City/Port/Factory doubling, the Port+Factory shared price counter, Warship/DP/SAM/Silo strip), time-to-afford at your measured gold rate, and concrete effects: City → exact +cap and +regen/s at your current pool; Factory → expected +trains/min from the spawn formula; Port → trade-route income range.
 - **Growth rate** — your live troop growth in troops/sec (smoothed first derivative), plus your troops as % of cap, color-coded by regen zone (mid-range grows fastest).
 - **Forward projection** — where your troop count is headed over the next 30s/60s/120s/300s (cycle with the `±60s` button), simulated with the game's exact regen formula and your current troop cap.
 - **"One click back" counterfactual** — when you spend troops (attack, boat, donation), an amber dashed line keeps growing the trajectory you were on *before* that click, and the panel shows how far behind it you are now and at the projection horizon. Watch the gap decay as you regrow — or widen when spending put you on a slower part of the regen curve. Red markers flag each spend. Only your own actions rebase the counterfactual; combat losses don't.

@@ -68,6 +68,7 @@
     pendingSpendUntilTick: tg.pendingSpendUntilTick ?? -1,
     spendEvents: tg.spendEvents || [], // {tick, amount}
     growthEma: tg.growthEma ?? null,
+    goldEma: tg.goldEma ?? null,
     horizonIdx: tg.horizonIdx ?? 1,
     panel: tg.panel || null,
     visible: tg.visible ?? true,
@@ -111,6 +112,7 @@
   }
 
   fn._troopGraphMath = { troopInc, projectTrajectory, breakEvenTicks };
+  // trainsPerMin/unitCost are attached below their definitions (test hooks).
 
   // ---------------------------------------------------------------------------
   // Live game reads
@@ -188,6 +190,24 @@
     return total;
   }
 
+  function readGold(me) {
+    try {
+      const gold = Number(me.gold());
+      if (Number.isFinite(gold) && gold >= 0) return gold;
+    } catch (_) {}
+    return null;
+  }
+
+  function countUnits(me, type) {
+    try {
+      if (typeof me.units === "function") {
+        const units = me.units(type) || [];
+        return units.length;
+      }
+    } catch (_) {}
+    return 0;
+  }
+
   function readSample() {
     const me = getMyPlayerView();
     if (!me) return null;
@@ -201,8 +221,76 @@
       actual,
       max: readMaxTroops(me),
       inFlight: readInFlightTroops(me),
+      gold: readGold(me),
+      nCity: countUnits(me, "City"),
+      nPort: countUnits(me, "Port"),
+      nFactory: countUnits(me, "Factory"),
+      nWarship: countUnits(me, "Warship"),
+      nDefensePost: countUnits(me, "Defense Post"),
+      nSam: countUnits(me, "SAM Launcher"),
     };
   }
+
+  // Live building cost: prefer the game's own config (exact, includes
+  // infinite-gold etc.), fall back to the published price formulas.
+  // NB: Port and Factory share one price counter in the current source.
+  function unitCost(type, sample, me) {
+    const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
+    if (game && me && typeof game.config === "function") {
+      try {
+        const info = game.config().unitInfo(type);
+        if (info && typeof info.cost === "function") {
+          const cost = Number(info.cost(game, me));
+          if (Number.isFinite(cost) && cost >= 0) return cost;
+        }
+      } catch (_) {}
+    }
+    const s = sample || {};
+    switch (type) {
+      case "City":
+        return Math.min(1e6, 125000 * Math.pow(2, s.nCity || 0));
+      case "Port":
+      case "Factory":
+        return Math.min(
+          1e6,
+          125000 * Math.pow(2, (s.nPort || 0) + (s.nFactory || 0)),
+        );
+      case "Warship":
+        return Math.min(1e6, ((s.nWarship || 0) + 1) * 250000);
+      case "Defense Post":
+        return Math.min(250000, ((s.nDefensePost || 0) + 1) * 50000);
+      case "SAM Launcher":
+        return Math.min(3e6, ((s.nSam || 0) + 1) * 1500000);
+      case "Missile Silo":
+        return 1e6;
+      default:
+        return null;
+    }
+  }
+
+  function readCityCapBonus() {
+    const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
+    if (game && typeof game.config === "function") {
+      try {
+        const config = game.config();
+        if (config && typeof config.cityTroopIncrease === "function") {
+          const bonus = Number(config.cityTroopIncrease());
+          if (Number.isFinite(bonus) && bonus > 0) return bonus;
+        }
+      } catch (_) {}
+    }
+    return 250000;
+  }
+
+  // Expected trains per minute for n factories (current source:
+  // per-factory spawn chance 1/((n+10)*15) per tick).
+  function trainsPerMin(n) {
+    if (!(n > 0)) return 0;
+    return (n / ((n + 10) * 15)) * 600;
+  }
+
+  fn._troopGraphMath.trainsPerMin = trainsPerMin;
+  fn._troopGraphMath.unitCost = (type, sample) => unitCost(type, sample, null);
 
   // ---------------------------------------------------------------------------
   // Per-tick update
@@ -214,6 +302,7 @@
     tg.pendingSpendUntilTick = -1;
     tg.spendEvents.length = 0;
     tg.growthEma = null;
+    tg.goldEma = null;
     tg.lastGameTick = -1;
   }
 
@@ -288,6 +377,19 @@
       rate = ((actual - prev.actual) / (tick - prev.tick)) * TICKS_PER_SEC;
       tg.growthEma =
         tg.growthEma == null ? rate : tg.growthEma * 0.85 + rate * 0.15;
+      if (
+        Number.isFinite(live.gold) &&
+        prev.gold != null &&
+        Number.isFinite(prev.gold)
+      ) {
+        const goldRate =
+          ((live.gold - prev.gold) / (tick - prev.tick)) * TICKS_PER_SEC;
+        // Ignore huge one-tick jumps (conquest loot) for the income estimate.
+        if (goldRate >= 0 && goldRate < 1e6) {
+          tg.goldEma =
+            tg.goldEma == null ? goldRate : tg.goldEma * 0.9 + goldRate * 0.1;
+        }
+      }
     }
     const pot = max > 0 ? troopInc(actual, max) * TICKS_PER_SEC : null;
 
@@ -299,6 +401,13 @@
       max,
       rate: tg.growthEma,
       pot,
+      gold: live.gold,
+      nCity: live.nCity,
+      nPort: live.nPort,
+      nFactory: live.nFactory,
+      nWarship: live.nWarship,
+      nDefensePost: live.nDefensePost,
+      nSam: live.nSam,
     });
     if (tg.samples.length > HISTORY_MAX_TICKS) {
       tg.samples.splice(0, tg.samples.length - HISTORY_MAX_TICKS);
@@ -412,6 +521,11 @@
     rateCanvas.style.cssText = `display:block;width:100%;height:${RATE_H}px;padding:0 4px 2px;box-sizing:border-box`;
     panel.appendChild(rateCanvas);
 
+    const advisor = document.createElement("div");
+    advisor.style.cssText =
+      "border-top:1px solid rgba(148,163,184,0.25);margin-top:2px;padding:4px 8px 2px;font-size:10.5px;line-height:1.5";
+    panel.appendChild(advisor);
+
     const footer = document.createElement("div");
     footer.style.cssText =
       "display:flex;align-items:center;gap:8px;padding:2px 8px 6px;color:#94a3b8";
@@ -486,6 +600,7 @@
     tg.subline = subline;
     tg.canvas = canvas;
     tg.rateCanvas = rateCanvas;
+    tg.advisor = advisor;
     tg.horizonBtn = horizonBtn;
     return panel;
   }
@@ -601,6 +716,146 @@
 
     drawMainChart(horizonSec);
     drawRateChart(horizonSec);
+    renderAdvisor(last);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Advisor: optimal-band cue + build what-ifs (see research/STRATEGY_NOTES.md)
+  // ---------------------------------------------------------------------------
+
+  const OPTIMUM_FRACTION = 0.42; // regen-maximizing pool fraction (wiki-derived)
+
+  function affordHtml(cost, gold, goldRate) {
+    if (cost == null) return "";
+    if (gold != null && gold >= cost) {
+      return `<span style="color:${COLOR_ACTUAL}">now</span>`;
+    }
+    if (gold != null && goldRate > 0) {
+      const sec = (cost - gold) / goldRate;
+      if (sec < 3600) return `in ${fmtMinSec(sec * TICKS_PER_SEC)}`;
+    }
+    return `<span style="color:#64748b">—</span>`;
+  }
+
+  function advisorRow(name, cost, gold, goldRate, effectHtml) {
+    const costHtml =
+      cost == null ? "?" : `<span style="color:#cbd5e1">${fmt(cost)}</span>`;
+    return (
+      `<div style="display:flex;gap:6px;align-items:baseline">` +
+      `<span style="width:52px;color:#e2e8f0">${name}</span>` +
+      `<span style="width:74px">${costHtml} · ${affordHtml(cost, gold, goldRate)}</span>` +
+      `<span style="flex:1;color:#94a3b8">${effectHtml}</span></div>`
+    );
+  }
+
+  function renderAdvisor(last) {
+    if (!tg.advisor) return;
+    if (!last || !(last.max > 0)) {
+      tg.advisor.innerHTML = "";
+      return;
+    }
+    const me = getMyPlayerView();
+    const gold = last.gold;
+    const goldRate = tg.goldEma;
+    const parts = [];
+
+    // Gold status line.
+    const goldHtml =
+      gold == null
+        ? ""
+        : `<span style="color:#fde68a">⛁ ${fmt(gold)}</span>` +
+          (goldRate != null
+            ? ` <span style="color:#94a3b8">+${fmt(goldRate)}/s</span>`
+            : "");
+
+    // 42% optimum cue.
+    const optimum = OPTIMUM_FRACTION * last.max;
+    const frac = last.actual / last.max;
+    let cue;
+    if (frac > 0.52) {
+      cue =
+        `over the 42% growth peak — spending ` +
+        `<b style="color:${COLOR_ACTUAL}">${fmt(last.actual - optimum)}</b> is nearly free`;
+    } else if (frac >= 0.32) {
+      cue = `in the growth sweet spot (peak 42%)`;
+    } else {
+      const ticksToOpt = (() => {
+        let t = last.actual;
+        for (let i = 1; i <= BREAK_EVEN_MAX_TICKS; i++) {
+          t += troopInc(t, last.max);
+          if (t >= optimum) return i;
+        }
+        return null;
+      })();
+      cue =
+        `below the 42% peak — big spends are expensive` +
+        (ticksToOpt ? `; peak regen in ${fmtMinSec(ticksToOpt)}` : "");
+    }
+    parts.push(
+      `<div style="display:flex;gap:8px"><span style="flex:1;color:#94a3b8">${cue}</span>${goldHtml}</div>`,
+    );
+
+    // City: exact cap/regen effect.
+    const cityCost = unitCost("City", last, me);
+    const capBonus = readCityCapBonus();
+    const dRegen =
+      (troopInc(last.actual, last.max + capBonus) -
+        troopInc(last.actual, last.max)) *
+      TICKS_PER_SEC;
+    parts.push(
+      advisorRow(
+        `City<span style="color:#64748b">×${last.nCity ?? 0}</span>`,
+        cityCost,
+        gold,
+        goldRate,
+        `+${fmt(capBonus)} cap → regen <b style="color:${COLOR_ACTUAL}">+${fmt(dRegen)}/s</b> now`,
+      ),
+    );
+
+    // Port: trade income (shared price counter with Factory).
+    const portCost = unitCost("Port", last, me);
+    parts.push(
+      advisorRow(
+        `Port<span style="color:#64748b">×${last.nPort ?? 0}</span>`,
+        portCost,
+        gold,
+        goldRate,
+        `trade ships ≈75–125K+/route each way; more ports → more ships`,
+      ),
+    );
+
+    // Factory: expected trains delta from the spawn formula.
+    const factoryCost = unitCost("Factory", last, me);
+    const n = last.nFactory ?? 0;
+    const dTrains = trainsPerMin(n + 1) - trainsPerMin(n);
+    parts.push(
+      advisorRow(
+        `Fctry<span style="color:#64748b">×${n}</span>`,
+        factoryCost,
+        gold,
+        goldRate,
+        `+${dTrains.toFixed(1)} trains/min × 10–35K/stop (needs rail links)`,
+      ),
+    );
+
+    // Compact cost strip for the rest.
+    const strip = [
+      ["War", unitCost("Warship", last, me)],
+      ["DP", unitCost("Defense Post", last, me)],
+      ["SAM", unitCost("SAM Launcher", last, me)],
+      ["Silo", unitCost("Missile Silo", last, me)],
+    ]
+      .map(([label, cost]) => {
+        const ok = cost != null && gold != null && gold >= cost;
+        const color = ok ? "#cbd5e1" : "#64748b";
+        return `<span style="color:${color}">${label} ${cost == null ? "?" : fmt(cost)}</span>`;
+      })
+      .join(" · ");
+    parts.push(
+      `<div style="color:#64748b;font-size:10px;padding-top:1px">${strip}</div>`,
+    );
+
+    tg.advisor.innerHTML = parts.join("");
   }
 
   function drawMainChart(horizonSec) {
