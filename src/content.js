@@ -66,6 +66,38 @@
     return readMarkerData("data-ofe-map-transform");
   }
 
+  function getEconMarkers() {
+    return readMarkerData("data-ofe-econ-markers");
+  }
+
+  function getAttackReadyBadges() {
+    return readMarkerData("data-ofe-attack-ready");
+  }
+
+  const ECON_TYPE_COLORS = {
+    Port: "#67e8f9",
+    Factory: "#fbbf24",
+    City: "#6ee7a8",
+  };
+
+  function getOrCreatePillMarker(markerId) {
+    let marker = markerById.get(markerId);
+    if (marker && dotContainer && dotContainer.contains(marker)) {
+      return marker;
+    }
+    marker = document.createElement("div");
+    marker.id = markerId;
+    marker.dataset.ofeMarkerKind = "pill";
+    marker.style.cssText =
+      "position:absolute;left:0;top:0;pointer-events:none;will-change:transform;" +
+      "white-space:nowrap;padding:0 3px;border-radius:3px;" +
+      "background:rgba(15,23,42,0.85);border:1px solid rgba(148,163,184,0.5);" +
+      "font:800 9px/12px Arial,sans-serif;text-shadow:none;";
+    markerById.set(markerId, marker);
+    dotContainer.appendChild(marker);
+    return marker;
+  }
+
   function getNameLayerContainer() {
     if (
       cachedNameLayerContainer &&
@@ -315,6 +347,40 @@
       usedDots.add(markerId);
     }
 
+    const econMarkers = getEconMarkers();
+    for (const id in econMarkers) {
+      const pos = econMarkers[id];
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) continue;
+      const markerId = `ofe-econ-${id}`;
+      const marker = getOrCreatePillMarker(markerId);
+      const color = ECON_TYPE_COLORS[pos.type] || "#e2e8f0";
+      if (marker.textContent !== pos.text) marker.textContent = pos.text;
+      if (marker.style.color !== color) {
+        marker.style.color = color;
+        marker.style.borderColor = color;
+      }
+      marker.style.transform =
+        `translate(${pos.x}px, ${pos.y}px) translate(-50%, -160%) scale(var(--ofe-marker-scale))`;
+      usedDots.add(markerId);
+    }
+
+    const attackBadges = getAttackReadyBadges();
+    for (const id in attackBadges) {
+      const pos = attackBadges[id];
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) continue;
+      const markerId = `ofe-ready-${id}`;
+      const marker = getOrCreatePillMarker(markerId);
+      const text = (pos.bot ? "🤖" : "⚔") + (pos.label || "");
+      if (marker.textContent !== text) marker.textContent = text;
+      if (marker.style.color !== pos.color) {
+        marker.style.color = pos.color || "#e2e8f0";
+        marker.style.borderColor = pos.color || "#e2e8f0";
+      }
+      marker.style.transform =
+        `translate(${pos.x}px, ${pos.y}px) translate(-50%, 60%) scale(var(--ofe-marker-scale))`;
+      usedDots.add(markerId);
+    }
+
     for (const [id, marker] of markerById.entries()) {
       if (!usedDots.has(id)) {
         marker.remove();
@@ -335,7 +401,9 @@
         if (
           mutation.attributeName === "data-ofe-nations" ||
           mutation.attributeName === "data-ofe-building-stacks" ||
-          mutation.attributeName === "data-ofe-map-transform"
+          mutation.attributeName === "data-ofe-map-transform" ||
+          mutation.attributeName === "data-ofe-econ-markers" ||
+          mutation.attributeName === "data-ofe-attack-ready"
         ) {
           if (markersActive) updateMarkers();
           if (markersActive) updateMarkerScale();
@@ -350,6 +418,8 @@
         "data-ofe-nations",
         "data-ofe-building-stacks",
         "data-ofe-map-transform",
+        "data-ofe-econ-markers",
+        "data-ofe-attack-ready",
       ],
     });
   }

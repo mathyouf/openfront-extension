@@ -23,6 +23,7 @@
     DISPLAY_EVENT: 3,
     ALLIANCE_EXTENSION: 9,
     UNIT_INCOMING: 14,
+    BONUS_EVENT: 15,
   };
 
   ns.constants.EXT_SHORTCUTS = {

@@ -40,6 +40,9 @@
   const VISIBLE_KEY = "ofe.troopgraph.visible";
   const POS_KEY = "ofe.troopgraph.pos";
   const HORIZON_KEY = "ofe.troopgraph.horizon";
+  const SMART_SLIDER_KEY = "ofe.troopgraph.smartslider";
+  const SMART_FLOOR = 0.4; // never let one click take the pool below 40% of cap
+  const OPTIMAL_ATTACK_MULT = 1.66; // saturates the [0.6,2] loss clamp
   const PANEL_W = 300;
   const MAIN_H = 150;
   const RATE_H = 84;
@@ -69,6 +72,8 @@
     spendEvents: tg.spendEvents || [], // {tick, amount}
     growthEma: tg.growthEma ?? null,
     goldEma: tg.goldEma ?? null,
+    smartSlider: tg.smartSlider ?? false,
+    lastSliderApplyTick: tg.lastSliderApplyTick ?? -1,
     horizonIdx: tg.horizonIdx ?? 1,
     panel: tg.panel || null,
     visible: tg.visible ?? true,
@@ -413,7 +418,53 @@
       tg.samples.splice(0, tg.samples.length - HISTORY_MAX_TICKS);
     }
 
+    smartSliderTick(tick, actual, max);
+
     render();
+  }
+
+  // Smart slider: keep the attack-ratio slider set so ONE click is optimal.
+  // Hovering an enemy: commit 1.66x their troops (the loss-clamp optimum),
+  // but never more than would drop the pool below 40% of cap. Hovering
+  // nothing: commit exactly down to 40% of cap. Only adjusts the game's own
+  // slider setting — every attack/donation is still the player's own click.
+  function smartSliderTick(tick, pool, max) {
+    if (!tg.smartSlider) return;
+    if (!(pool > 0) || !(max > 0)) return;
+    if (tick - tg.lastSliderApplyTick < 3) return;
+    if (!fn.applyAttackRatio || !fn.readCurrentAttackRatio) return;
+
+    // Ratio that lands the pool exactly on the 40% floor.
+    const floorRatio = 1 - (SMART_FLOOR * max) / pool;
+
+    let target = floorRatio;
+    const hovered = fn.getHoveredPlayer ? fn.getHoveredPlayer() : null;
+    if (hovered) {
+      try {
+        const me = getMyPlayerView();
+        const isSelf =
+          me &&
+          typeof me.id === "function" &&
+          typeof hovered.id === "function" &&
+          me.id() === hovered.id();
+        const friendly =
+          me && typeof me.isFriendly === "function" && me.isFriendly(hovered);
+        if (!isSelf && !friendly) {
+          const def = Number(hovered.troops());
+          if (Number.isFinite(def) && def >= 0) {
+            const attackRatio = (OPTIMAL_ATTACK_MULT * def) / pool;
+            target = Math.min(attackRatio, Math.max(floorRatio, 0));
+          }
+        }
+      } catch (_) {}
+    }
+
+    const clamped = Math.min(1, Math.max(0.01, target));
+    const current = fn.readCurrentAttackRatio();
+    if (current == null || Math.abs(current - clamped) > 0.005) {
+      tg.lastSliderApplyTick = tick;
+      fn.applyAttackRatio(clamped);
+    }
   }
 
   function onOwnIntent(intent) {
@@ -525,6 +576,74 @@
     advisor.style.cssText =
       "border-top:1px solid rgba(148,163,184,0.25);margin-top:2px;padding:4px 8px 2px;font-size:10.5px;line-height:1.5";
     panel.appendChild(advisor);
+
+    const pillCss = (on) =>
+      "border-radius:5px;padding:1px 7px;cursor:pointer;font:10px system-ui;" +
+      (on
+        ? "background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.45);color:#86efac"
+        : "background:rgba(148,163,184,0.12);border:1px solid rgba(148,163,184,0.3);color:#94a3b8");
+
+    const controls = document.createElement("div");
+    controls.style.cssText =
+      "display:flex;align-items:center;gap:6px;padding:3px 8px 2px";
+
+    const smartBtn = document.createElement("button");
+    smartBtn.title =
+      "Auto-set the attack slider: hovering an enemy → 1.66× their troops (loss-optimal), never below the 40% growth floor; otherwise → one click spends down to 40% of cap.";
+    const syncSmartBtn = () => {
+      smartBtn.style.cssText = pillCss(tg.smartSlider);
+      smartBtn.textContent = "⚖ smart slider→40%";
+    };
+    smartBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      tg.smartSlider = !tg.smartSlider;
+      try {
+        localStorage.setItem(SMART_SLIDER_KEY, tg.smartSlider ? "1" : "0");
+      } catch (_) {}
+      syncSmartBtn();
+    });
+    syncSmartBtn();
+    controls.appendChild(smartBtn);
+
+    const econBtn = document.createElement("button");
+    econBtn.title =
+      "Label your ports/factories/cities on the map with measured gold per minute of existence.";
+    const syncEconBtn = () => {
+      econBtn.style.cssText = pillCss(
+        fn.econMarkersEnabled ? fn.econMarkersEnabled() : false,
+      );
+      econBtn.textContent = "$/min labels";
+    };
+    econBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (fn.setEconMarkersEnabled && fn.econMarkersEnabled) {
+        fn.setEconMarkersEnabled(!fn.econMarkersEnabled());
+      }
+      syncEconBtn();
+    });
+    syncEconBtn();
+    controls.appendChild(econBtn);
+
+    const readyBtn = document.createElement("button");
+    readyBtn.title =
+      "Badge each neighbor with the slider % needed for a loss-optimal (1.66×) attack, colored by whether your current slider meets it.";
+    const syncReadyBtn = () => {
+      readyBtn.style.cssText = pillCss(
+        fn.attackReadyEnabled ? fn.attackReadyEnabled() : false,
+      );
+      readyBtn.textContent = "⚔ ready %";
+    };
+    readyBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (fn.setAttackReadyEnabled && fn.attackReadyEnabled) {
+        fn.setAttackReadyEnabled(!fn.attackReadyEnabled());
+      }
+      syncReadyBtn();
+    });
+    syncReadyBtn();
+    controls.appendChild(readyBtn);
+
+    panel.appendChild(controls);
 
     const footer = document.createElement("div");
     footer.style.cssText =
@@ -1169,6 +1288,9 @@
       if (Number.isFinite(idx) && idx >= 0 && idx < HORIZONS_SEC.length) {
         tg.horizonIdx = idx;
       }
+    } catch (_) {}
+    try {
+      tg.smartSlider = localStorage.getItem(SMART_SLIDER_KEY) === "1";
     } catch (_) {}
 
     if (fn.onGameTick) fn.onGameTick(onTick);

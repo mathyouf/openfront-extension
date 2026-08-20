@@ -31,6 +31,7 @@
         document.documentElement.removeAttribute("data-ofe-nations");
         document.documentElement.removeAttribute("data-ofe-building-stacks");
         document.documentElement.removeAttribute("data-ofe-map-transform");
+        document.documentElement.removeAttribute("data-ofe-econ-markers");
       }
     } catch (_) {}
   }
@@ -1768,6 +1769,9 @@
 
     return updated;
   }
+
+  fn.readCurrentAttackRatio = readCurrentAttackRatio;
+  fn.applyAttackRatio = applyAttackRatio;
 
   fn.initWorkerHooks = () => {
     if (state.workerHooksInitialized) return;

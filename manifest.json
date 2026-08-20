@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OpenFront Enhanced",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Red markers on nations during spawn selection, visible at any zoom level.",
   "permissions": [],
   "host_permissions": [
@@ -35,6 +35,8 @@
         "src/pagehook/emoji-search.js",
         "src/pagehook/game-hooks.js",
         "src/pagehook/troop-graph.js",
+        "src/pagehook/econ-markers.js",
+        "src/pagehook/attack-ready.js",
         "src/pagehook/neighbor-watch.js",
         "src/pagehook/shortcuts.js",
         "src/page-hook.js"

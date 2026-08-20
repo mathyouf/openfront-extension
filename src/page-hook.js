@@ -19,6 +19,8 @@
   ns.fn.initShortcutHandlers?.();
   ns.fn.initSettingsIntegration?.();
   ns.fn.initEventsPanelIntegration?.();
+  ns.fn.initEconMarkers?.();
+  ns.fn.initAttackReady?.();
   ns.fn.initTroopGraph?.();
 
   if (document.readyState === "loading") {
