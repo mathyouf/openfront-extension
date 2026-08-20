@@ -271,6 +271,7 @@
   }
 
   function buildExtensionKeybindRows(root) {
+    if (!Object.keys(constants.EXT_SHORTCUTS).length) return;
     const keybindHeading = document.createElement("h2");
     keybindHeading.textContent = "Extension Keybinds";
     keybindHeading.className =

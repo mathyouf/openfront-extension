@@ -370,11 +370,19 @@
       if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) continue;
       const markerId = `ofe-ready-${id}`;
       const marker = getOrCreatePillMarker(markerId);
-      const text = (pos.bot ? "🤖" : "⚔") + (pos.label || "");
+      const prefix = pos.atk ? "▶" : pos.bot ? "🤖" : "⚔";
+      const text = prefix + (pos.label || "");
       if (marker.textContent !== text) marker.textContent = text;
-      if (marker.style.color !== pos.color) {
-        marker.style.color = pos.color || "#e2e8f0";
-        marker.style.borderColor = pos.color || "#e2e8f0";
+      const color = pos.color || "#e2e8f0";
+      if (marker.style.color !== color) {
+        marker.style.color = color;
+        marker.style.borderColor = color;
+      }
+      // Attacking neighbors get a sharp, heavier square badge.
+      const radius = pos.atk ? "0" : "3px";
+      if (marker.style.borderRadius !== radius) {
+        marker.style.borderRadius = radius;
+        marker.style.borderWidth = pos.atk ? "2px" : "1px";
       }
       marker.style.transform =
         `translate(${pos.x}px, ${pos.y}px) translate(-50%, 60%) scale(var(--ofe-marker-scale))`;

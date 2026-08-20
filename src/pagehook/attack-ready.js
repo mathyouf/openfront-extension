@@ -12,16 +12,20 @@
  * Terrain (plains 80 / highland 100 / mountain 120), defense posts, and the
  * bot 0.7x modifier still matter — the badge is the troop-ratio picture.
  *
- * Badge label: "≥37%" = slider needed for 1.66x at your current pool
- * ("MAX n×" when even 100% falls short).
+ * NOT-YET-ATTACKED neighbor (rounded pill, ⚔/🤖 prefix):
+ *   label "≥37%" = slider needed for 1.66x at your current pool
+ *   ("MAX n×" when even 100% falls short);
+ *   color = gradient on q = spendable / theirTroops, where spendable =
+ *   pool MINUS the 40%-of-cap growth floor.
  *
- * Badge color: a smooth gradient on q = spendable / theirTroops, where
- * spendable = your pool MINUS the 40%-of-cap growth floor (the most you
- * could commit without leaving the fast-regen band). Independent of the
- * current slider setting.
- *   red (q=0) → orange (q=0.5) → yellow (q=1: you can match them)
- *   → green (q=1.66: you can afford the loss-optimal commit)
- *   → blue (q>=2: overwhelming margin)
+ * ALREADY-ATTACKING neighbor (sharp square badge, ▶ prefix):
+ *   label = your current sent multiple, e.g. "1.2×" (in-flight outgoing
+ *   attacks on them / their troops);
+ *   color = gradient on q = (sent + spendable) / theirTroops — can you
+ *   still top the wave up to the optimum — and WHITE once sent >= 1.66x.
+ *
+ * Gradient: red (0) → orange (0.5) → yellow (1: match) → green (1.66:
+ * loss-optimal) → blue (2+: overwhelming).
  *
  * Info-only: reads game state, never sends intents or takes actions.
  */
@@ -34,8 +38,9 @@
 
   const OPTIMAL_MULT = 1.66; // saturates the [0.6, 2] loss clamp
   const GROWTH_FLOOR = 0.4; // don't count troops below 40% of cap as spendable
-  const PUBLISH_INTERVAL_TICKS = 10;
+  const PUBLISH_INTERVAL_TICKS = 2; // 5x/sec — badges must feel live
   const ENABLED_KEY = "ofe.attackready.enabled";
+  const WHITE = "#ffffff";
 
   // Gradient stops on q = spendable / defenderTroops.
   const GRADIENT_STOPS = [
@@ -145,29 +150,43 @@
         const y = location ? Number(location.y) : NaN;
         if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
 
-        const optimalTroops = OPTIMAL_MULT * def;
-        const neededFraction = optimalTroops / myPool;
-
-        let label;
-        if (neededFraction > 1) {
-          label = `MAX ${(neededFraction).toFixed(1)}×`;
-        } else {
-          label = `≥${Math.max(1, Math.ceil(neededFraction * 100))}%`;
-        }
-
-        // q: how many multiples of their army you can afford to commit
-        // without dipping below the growth floor. def=0 → unbounded → blue.
-        const q = def > 0 ? spendable / def : Infinity;
-        const color = gradientColor(q === Infinity ? 99 : q);
-
+        const sent = fn.readSentTroopsOn ? fn.readSentTroopsOn(smallID) : 0;
         const type =
           typeof player.type === "function" ? String(player.type()) : "";
+
+        let label;
+        let color;
+        let attacking = false;
+        if (sent > 0) {
+          // Already attacking: show the current wave as a multiple of their
+          // troops; color = can (sent + spendable) still reach the optimum.
+          attacking = true;
+          const mult = def > 0 ? sent / def : Infinity;
+          label = mult === Infinity ? "∞×" : `${mult.toFixed(mult < 10 ? 1 : 0)}×`;
+          if (mult >= OPTIMAL_MULT) {
+            color = WHITE;
+          } else {
+            const q = def > 0 ? (sent + spendable) / def : Infinity;
+            color = gradientColor(q === Infinity ? 99 : q);
+          }
+        } else {
+          const optimalTroops = OPTIMAL_MULT * def;
+          const neededFraction = optimalTroops / myPool;
+          if (neededFraction > 1) {
+            label = `MAX ${neededFraction.toFixed(1)}×`;
+          } else {
+            label = `≥${Math.max(1, Math.ceil(neededFraction * 100))}%`;
+          }
+          const q = def > 0 ? spendable / def : Infinity;
+          color = gradientColor(q === Infinity ? 99 : q);
+        }
+
         badges[smallID] = {
           x,
           y,
           label,
           color,
-          q: Number.isFinite(q) ? Number(q.toFixed(2)) : null,
+          atk: attacking,
           bot: type === "BOT",
         };
       } catch (_) {}

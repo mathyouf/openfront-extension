@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "OpenFront Enhanced",
-  "version": "0.5.2",
-  "description": "Red markers on nations during spawn selection, visible at any zoom level.",
+  "version": "0.6.0",
+  "description": "Optimal troop management for OpenFront: smart 40% slider, per-neighbor attack-readiness badges, and $/min building labels.",
   "permissions": [],
   "host_permissions": [
     "*://openfront.io/*",
@@ -27,18 +27,13 @@
         "src/pagehook/utils.js",
         "src/pagehook/keybinds.js",
         "src/pagehook/settings-ui.js",
-        "src/pagehook/shortcut-panel.js",
         "src/pagehook/alliance-panel.js",
         "src/pagehook/events-panel.js",
-        "src/pagehook/chat-search.js",
-        "src/pagehook/emoji-priority.js",
-        "src/pagehook/emoji-search.js",
         "src/pagehook/game-hooks.js",
         "src/pagehook/troop-graph.js",
         "src/pagehook/econ-markers.js",
         "src/pagehook/attack-ready.js",
         "src/pagehook/neighbor-watch.js",
-        "src/pagehook/shortcuts.js",
         "src/page-hook.js"
       ],
       "run_at": "document_start",
@@ -52,8 +47,12 @@
         "*://www.openfront.dev/*",
         "*://*.openfront.dev/*"
       ],
-      "js": ["src/content.js"],
-      "css": ["src/content.css"],
+      "js": [
+        "src/content.js"
+      ],
+      "css": [
+        "src/content.css"
+      ],
       "run_at": "document_start"
     }
   ],

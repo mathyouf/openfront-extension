@@ -26,44 +26,9 @@
     BONUS_EVENT: 15,
   };
 
-  ns.constants.EXT_SHORTCUTS = {
-    chatSearch: {
-      action: "chatSearch",
-      label: "Chat Search",
-      desc: "Hovered player chat + search",
-      defaultCode: "KeyZ",
-    },
-    emojiSearch: {
-      action: "emojiSearch",
-      label: "Emoji Search",
-      desc: "Emoji selector + search",
-      defaultCode: "KeyX",
-    },
-    boatOnePercent: {
-      action: "boatOnePercent",
-      label: "Boat 1%",
-      desc: "Boat attack with fixed 1% troops",
-      defaultCode: "KeyN",
-    },
-    territoryCycle: {
-      action: "territoryCycle",
-      label: "Cycle Mini",
-      desc: "Jump camera between disconnected mini territories (100 tiles or fewer)",
-      defaultCode: "KeyH",
-    },
-    lastOfeAlert: {
-      action: "lastOfeAlert",
-      label: "Last OFE Alert",
-      desc: "Jump to the most recent clickable OFE alert.",
-      defaultCode: "KeyJ",
-    },
-    troopGraph: {
-      action: "troopGraph",
-      label: "Troop Graph",
-      desc: "Toggle the troop trajectory graph (growth rate + one-click-back counterfactual).",
-      defaultCode: "KeyI",
-    },
-  };
+  // Keyboard shortcuts removed 2026-08-20 (feature strip-down). Keep the
+  // container so keybinds.js/settings-ui iterate an empty set harmlessly.
+  ns.constants.EXT_SHORTCUTS = {};
 
   ns.constants.EXT_SOUND_SETTINGS = {
     spawnEntry: {

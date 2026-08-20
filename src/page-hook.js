@@ -16,7 +16,6 @@
   ns.fn.initWorkerHooks?.();
   ns.fn.initSocketHooks?.();
   ns.fn.initNeighborWatch?.();
-  ns.fn.initShortcutHandlers?.();
   ns.fn.initSettingsIntegration?.();
   ns.fn.initEventsPanelIntegration?.();
   ns.fn.initEconMarkers?.();
@@ -25,11 +24,9 @@
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
-      ns.fn.initShortcutPanel?.();
       ns.fn.initAlliancePanel?.();
     });
   } else {
-    ns.fn.initShortcutPanel?.();
     ns.fn.initAlliancePanel?.();
   }
 })();

@@ -1639,7 +1639,8 @@
       }
     }
 
-    publishNationMarkers(gu.playerNameViewData);
+    // Nation markers removed 2026-08-20 (feature strip-down): nations are no
+    // longer published; the marker transform still feeds econ/ready badges.
     publishBuildingStackMarkers();
     publishMarkerTransform();
 
