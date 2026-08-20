@@ -318,16 +318,25 @@
     return min > 0 ? `${min}:${String(sec).padStart(2, "0")}` : `${sec}s`;
   }
 
+  // The panel is on screen whenever a game is (spawn included) — it must
+  // appear instantly, showing placeholders until data flows.
+  function phaseActive() {
+    return state.gamePhase === "playing" || state.gamePhase === "spawn";
+  }
+
   function onTick(gu) {
     const tick = Number(gu && gu.tick);
     if (!Number.isFinite(tick)) return;
     if (tick < tg.lastGameTick - 5) resetForNewGame();
     tg.lastGameTick = tick;
 
-    if (state.gamePhase !== "playing") return;
+    if (!phaseActive()) return;
 
     const live = readSample();
-    if (!live) return;
+    if (!live) {
+      render(); // mount the panel immediately, even before data is readable
+      return;
+    }
     const { actual, max, inFlight } = live;
 
     const prev = tg.samples.length ? tg.samples[tg.samples.length - 1] : null;
@@ -730,8 +739,7 @@
       localStorage.setItem(VISIBLE_KEY, tg.visible ? "1" : "0");
     } catch (_) {}
     if (tg.panel) {
-      tg.panel.style.display =
-        tg.visible && state.gamePhase === "playing" ? "block" : "none";
+      tg.panel.style.display = tg.visible && phaseActive() ? "block" : "none";
     }
     if (tg.visible) render();
   }
@@ -779,7 +787,7 @@
   }
 
   function render() {
-    if (!tg.visible || state.gamePhase !== "playing") {
+    if (!tg.visible || !phaseActive()) {
       if (tg.panel) tg.panel.style.display = "none";
       return;
     }
@@ -1300,8 +1308,11 @@
         if (newPhase === "spawn" || newPhase === "none") resetForNewGame();
         if (tg.panel) {
           tg.panel.style.display =
-            tg.visible && newPhase === "playing" ? "block" : "none";
+            tg.visible && (newPhase === "playing" || newPhase === "spawn")
+              ? "block"
+              : "none";
         }
+        if (newPhase === "spawn" || newPhase === "playing") render();
       });
     }
   };
