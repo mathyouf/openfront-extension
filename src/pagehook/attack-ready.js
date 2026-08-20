@@ -3,7 +3,7 @@
 /**
  * Attack-readiness badges — for each NEIGHBOR you could attack, show the
  * slider % you'd need for an efficient attack, colored by whether your
- * CURRENT slider commitment meets it.
+ * SPENDABLE troops could afford it.
  *
  * Why 1.66x: the attacker-loss formula clamps defenderTroops/attackTroops
  * to [0.6, 2] (Config.ts attackLogic). Committing >= troops/0.6 = 1.66x the
@@ -12,11 +12,16 @@
  * Terrain (plains 80 / highland 100 / mountain 120), defense posts, and the
  * bot 0.7x modifier still matter — the badge is the troop-ratio picture.
  *
- * Badge: "≥37%" = slider needed for 1.66x at your current pool.
- *   green  = your current slider already commits >= 1.66x their troops
- *   amber  = current slider commits >= 1.0x (workable, paying extra losses)
- *   red    = current slider commits < 1.0x their troops
- *   "MAX"  = even 100% of your pool is < 1.66x (label shows the shortfall)
+ * Badge label: "≥37%" = slider needed for 1.66x at your current pool
+ * ("MAX n×" when even 100% falls short).
+ *
+ * Badge color: a smooth gradient on q = spendable / theirTroops, where
+ * spendable = your pool MINUS the 40%-of-cap growth floor (the most you
+ * could commit without leaving the fast-regen band). Independent of the
+ * current slider setting.
+ *   red (q=0) → orange (q=0.5) → yellow (q=1: you can match them)
+ *   → green (q=1.66: you can afford the loss-optimal commit)
+ *   → blue (q>=2: overwhelming margin)
  *
  * Info-only: reads game state, never sends intents or takes actions.
  */
@@ -28,8 +33,45 @@
   const { state, fn } = ns;
 
   const OPTIMAL_MULT = 1.66; // saturates the [0.6, 2] loss clamp
+  const GROWTH_FLOOR = 0.4; // don't count troops below 40% of cap as spendable
   const PUBLISH_INTERVAL_TICKS = 10;
   const ENABLED_KEY = "ofe.attackready.enabled";
+
+  // Gradient stops on q = spendable / defenderTroops.
+  const GRADIENT_STOPS = [
+    [0.0, [239, 68, 68]], // red
+    [0.5, [249, 115, 22]], // orange
+    [1.0, [234, 179, 8]], // yellow
+    [1.66, [34, 197, 94]], // green
+    [2.0, [59, 130, 246]], // blue
+  ];
+
+  function gradientColor(q) {
+    if (!Number.isFinite(q)) return "#94a3b8";
+    const stops = GRADIENT_STOPS;
+    if (q <= stops[0][0]) return rgb(stops[0][1]);
+    const lastStop = stops[stops.length - 1];
+    if (q >= lastStop[0]) return rgb(lastStop[1]);
+    for (let i = 1; i < stops.length; i++) {
+      const [q1, c1] = stops[i];
+      const [q0, c0] = stops[i - 1];
+      if (q <= q1) {
+        const t = (q - q0) / (q1 - q0);
+        return rgb([
+          Math.round(c0[0] + (c1[0] - c0[0]) * t),
+          Math.round(c0[1] + (c1[1] - c0[1]) * t),
+          Math.round(c0[2] + (c1[2] - c0[2]) * t),
+        ]);
+      }
+    }
+    return rgb(lastStop[1]);
+  }
+
+  function rgb(c) {
+    return `rgb(${c[0]},${c[1]},${c[2]})`;
+  }
+
+  fn._attackReadyGradient = gradientColor;
 
   const ar = (state.attackReadyState = state.attackReadyState || {
     enabled: true,
@@ -66,8 +108,12 @@
     } catch (_) {}
     if (!me || !Number.isFinite(myPool) || myPool <= 0) return;
 
-    const ratio = fn.readCurrentAttackRatio ? fn.readCurrentAttackRatio() : null;
-    const committed = ratio != null ? ratio * myPool : null;
+    // Spendable = everything above the 40%-of-cap growth floor.
+    const myMax = fn.readMyMaxTroops ? fn.readMyMaxTroops() : null;
+    const spendable =
+      myMax != null && myMax > 0
+        ? Math.max(0, myPool - GROWTH_FLOOR * myMax)
+        : myPool;
 
     const badges = {};
     const neighborIds = Object.keys(state.neighborStatusById || {});
@@ -109,12 +155,10 @@
           label = `≥${Math.max(1, Math.ceil(neededFraction * 100))}%`;
         }
 
-        let color = "#94a3b8";
-        if (committed != null) {
-          if (committed >= optimalTroops) color = "#22c55e";
-          else if (committed >= def) color = "#f59e0b";
-          else color = "#ef4444";
-        }
+        // q: how many multiples of their army you can afford to commit
+        // without dipping below the growth floor. def=0 → unbounded → blue.
+        const q = def > 0 ? spendable / def : Infinity;
+        const color = gradientColor(q === Infinity ? 99 : q);
 
         const type =
           typeof player.type === "function" ? String(player.type()) : "";
@@ -123,6 +167,7 @@
           y,
           label,
           color,
+          q: Number.isFinite(q) ? Number(q.toFixed(2)) : null,
           bot: type === "BOT",
         };
       } catch (_) {}

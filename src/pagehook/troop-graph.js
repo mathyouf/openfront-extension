@@ -213,6 +213,11 @@
     return 0;
   }
 
+  fn.readMyMaxTroops = () => {
+    const me = getMyPlayerView();
+    return me ? readMaxTroops(me) : null;
+  };
+
   function readSample() {
     const me = getMyPlayerView();
     if (!me) return null;
@@ -465,6 +470,10 @@
             target = Math.min(attackRatio, Math.max(floorRatio, 0));
           }
         }
+        // Hovered ALLY: keep the floor target — one donation click sends the
+        // maximum that leaves the pool at the 40% growth floor (the donate
+        // intent carries the slider amount; the server only truncates to the
+        // ally's free cap space, so nothing is wasted).
       } catch (_) {}
     }
 
@@ -635,7 +644,7 @@
 
     const readyBtn = document.createElement("button");
     readyBtn.title =
-      "Badge each neighbor with the slider % needed for a loss-optimal (1.66×) attack, colored by whether your current slider meets it.";
+      "Badge each neighbor with the slider % needed for a loss-optimal (1.66×) attack. Color = whether your SPENDABLE troops (above the 40% growth floor) could afford it: red→orange→yellow (1× match)→green (1.66× optimal)→blue (2×+ overwhelming).";
     const syncReadyBtn = () => {
       readyBtn.style.cssText = pillCss(
         fn.attackReadyEnabled ? fn.attackReadyEnabled() : false,
