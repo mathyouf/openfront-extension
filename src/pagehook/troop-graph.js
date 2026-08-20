@@ -1,20 +1,27 @@
 "use strict";
 
 /**
- * Troop Graph — top-right trajectory panel.
+ * Troop Graph v2 — top-right trajectory panel, two stacked charts.
  *
- * Shows troop history, current growth rate (first derivative), and two
- * forward projections simulated with the game's exact regen formula:
- *   - where your troops are headed NOW, and
- *   - the counterfactual trajectory you were on before your LAST
- *     troop-spending click (attack / boat / donation), i.e. "one click back".
+ * MAIN CHART: troop pool history + forward projection, effective troops
+ * (pool + troops committed to in-flight attacks), and up to 4 stacked
+ * counterfactuals — one per recent troop-spending click — each simulated
+ * with the troop CAP FROZEN at click time (no click -> no new territory).
+ * The actual projection runs on the CURRENT cap, so a click that captured
+ * land visibly out-grows its counterfactual: the crossing is the
+ * break-even time, reported in the readout. A failed attack never crosses.
+ *
+ * RATE CHART: net troop growth per second over time, with the game's pure
+ * regen potential overlaid — the gap between them is your combat drain.
  *
  * Info-only: reads game state, never sends intents or takes actions.
  *
- * Regen formula (OpenFrontIO src/core/configuration/Config.ts, Human player,
- * applied every tick at 10 ticks/sec):
- *   maxTroops = 2 * (tiles^0.6 * 1000 + 50000) + sum(cityLevels) * 250000
- *   inc = (10 + troops^0.73 / 4) * (1 - troops / max), clamped to max
+ * Mechanics (openfrontio/OpenFrontIO src/core/configuration/Config.ts;
+ * full notes in research/TROOP_MECHANICS.md of the workspace):
+ *   inc/tick = (10 + troops^0.73/4) * (1 - troops/max), 10 ticks/sec
+ *   max = 2*(tiles^0.6*1000 + 50000) + sum(cityLevels)*250000
+ *   attack launch removes troops into the attack unit (they mostly return);
+ *   conquered tiles raise max, so clicks can pay for themselves.
  */
 
 (() => {
@@ -26,44 +33,50 @@
   const TICKS_PER_SEC = 10;
   const HISTORY_MAX_TICKS = 6 * 60 * TICKS_PER_SEC;
   const SPEND_INTENT_TYPES = new Set(["attack", "boat", "donate_troops"]);
-  // An own spend intent arms rebase detection for this many ticks.
   const SPEND_PENDING_TICKS = 25;
+  const MAX_CFS = 4;
+  const BREAK_EVEN_MAX_TICKS = 10 * 60 * TICKS_PER_SEC;
   const HORIZONS_SEC = [30, 60, 120, 300];
   const VISIBLE_KEY = "ofe.troopgraph.visible";
   const POS_KEY = "ofe.troopgraph.pos";
   const HORIZON_KEY = "ofe.troopgraph.horizon";
   const PANEL_W = 300;
-  const CANVAS_H = 150;
+  const MAIN_H = 150;
+  const RATE_H = 84;
 
-  // Growth-zone coloring for troops as % of cap (income rate is fastest
-  // mid-range; matches the community control-panel-enhancement thresholds).
+  const COLOR_ACTUAL = "#6ee7a8";
+  const COLOR_EFFECTIVE = "#67e8f9";
+  const COLOR_CF = "#fbbf24";
+  const COLOR_POTENTIAL = "#94a3b8";
+  const COLOR_DRAIN = "rgba(248,113,113,0.28)";
+  const COLOR_SPEND = "#f87171";
+
+  // Growth-zone coloring for troops as % of cap (regen is fastest mid-band).
   const CAP_ZONES = [
-    { test: (p) => p < 9 || p > 82, color: "#f87171", label: "critical" },
-    { test: (p) => p < 18 || p > 70, color: "#fb923c", label: "warning" },
-    { test: (p) => p < 23 || p > 64, color: "#eab308", label: "caution" },
-    { test: (p) => p < 31 || p > 54, color: "#22c55e", label: "good" },
-    { test: () => true, color: "#22d3ee", label: "excellent" },
+    { test: (p) => p < 9 || p > 82, color: "#f87171" },
+    { test: (p) => p < 18 || p > 70, color: "#fb923c" },
+    { test: (p) => p < 23 || p > 64, color: "#eab308" },
+    { test: (p) => p < 31 || p > 54, color: "#22c55e" },
+    { test: () => true, color: "#22d3ee" },
   ];
 
-  const tg = (state.troopGraphState = state.troopGraphState || {
-    samples: [], // {tick, actual, cf, max}
-    cfTroops: null,
-    pendingSpendUntilTick: -1,
-    spendEvents: [], // {tick, amount}
-    lastSpendAmount: 0,
-    growthEma: null, // troops per second, smoothed
-    horizonIdx: 1,
-    panel: null,
-    canvas: null,
-    header: null,
-    subline: null,
-    visible: true,
-    initialized: false,
-    lastGameTick: -1,
+  const tg = (state.troopGraphState = state.troopGraphState || {});
+  Object.assign(tg, {
+    samples: tg.samples || [], // {tick, actual, effective, max, rate, pot}
+    cfs: tg.cfs || [], // {id, tick, amount, v, max, hist:[[tick,v]]}
+    nextCfId: tg.nextCfId || 1,
+    pendingSpendUntilTick: tg.pendingSpendUntilTick ?? -1,
+    spendEvents: tg.spendEvents || [], // {tick, amount}
+    growthEma: tg.growthEma ?? null,
+    horizonIdx: tg.horizonIdx ?? 1,
+    panel: tg.panel || null,
+    visible: tg.visible ?? true,
+    initialized: tg.initialized ?? false,
+    lastGameTick: tg.lastGameTick ?? -1,
   });
 
   // ---------------------------------------------------------------------------
-  // Pure math (also exposed for tests via fn._troopGraphMath)
+  // Pure math (exposed for tests via fn._troopGraphMath)
   // ---------------------------------------------------------------------------
 
   function troopInc(troops, max) {
@@ -73,8 +86,6 @@
     return Math.min(troops + toAdd, max) - troops;
   }
 
-  // Simulate `ticks` ticks of pure regen from `troops` with cap `max`.
-  // Returns an array of length ticks+1 including the starting value.
   function projectTrajectory(troops, max, ticks) {
     const out = new Array(ticks + 1);
     let t = troops;
@@ -86,7 +97,20 @@
     return out;
   }
 
-  fn._troopGraphMath = { troopInc, projectTrajectory };
+  // First tick at which pure regen from (a, maxA) catches (b, maxB); null if
+  // not within limit. a = actual (current cap), b = counterfactual (frozen).
+  function breakEvenTicks(a, maxA, b, maxB, limit) {
+    let x = a;
+    let y = b;
+    for (let i = 1; i <= limit; i++) {
+      x += troopInc(x, maxA);
+      y += troopInc(y, maxB);
+      if (x >= y) return i;
+    }
+    return null;
+  }
+
+  fn._troopGraphMath = { troopInc, projectTrajectory, breakEvenTicks };
 
   // ---------------------------------------------------------------------------
   // Live game reads
@@ -103,7 +127,6 @@
   }
 
   function readMaxTroops(me) {
-    // Preferred: the game's own config (exact, includes game modifiers).
     const game = fn.getAnyGameView ? fn.getAnyGameView() : null;
     if (game && typeof game.config === "function") {
       try {
@@ -114,8 +137,6 @@
         }
       } catch (_) {}
     }
-
-    // Fallback: recompute from the published formula.
     try {
       const tiles = Number(me.numTilesOwned());
       if (!Number.isFinite(tiles) || tiles < 0) return null;
@@ -144,6 +165,29 @@
     }
   }
 
+  function attackField(attack, name) {
+    if (!attack) return null;
+    const raw =
+      typeof attack[name] === "function" ? attack[name]() : attack[name];
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  // Troops currently committed to your own in-flight attacks/boats.
+  function readInFlightTroops(me) {
+    let total = 0;
+    try {
+      if (typeof me.outgoingAttacks === "function") {
+        const attacks = me.outgoingAttacks() || [];
+        for (const attack of attacks) {
+          const troops = attackField(attack, "troops");
+          if (troops != null && troops > 0) total += troops;
+        }
+      }
+    } catch (_) {}
+    return total;
+  }
+
   function readSample() {
     const me = getMyPlayerView();
     if (!me) return null;
@@ -151,11 +195,13 @@
     try {
       actual = Number(me.troops());
     } catch (_) {}
-    if (!Number.isFinite(actual)) {
-      actual = Number(state.myPlayerTroops);
-    }
+    if (!Number.isFinite(actual)) actual = Number(state.myPlayerTroops);
     if (!Number.isFinite(actual) || actual < 0) return null;
-    return { actual, max: readMaxTroops(me) };
+    return {
+      actual,
+      max: readMaxTroops(me),
+      inFlight: readInFlightTroops(me),
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -164,12 +210,18 @@
 
   function resetForNewGame() {
     tg.samples.length = 0;
-    tg.cfTroops = null;
+    tg.cfs.length = 0;
     tg.pendingSpendUntilTick = -1;
     tg.spendEvents.length = 0;
-    tg.lastSpendAmount = 0;
     tg.growthEma = null;
     tg.lastGameTick = -1;
+  }
+
+  function fmtMinSec(ticks) {
+    const seconds = Math.round(ticks / TICKS_PER_SEC);
+    const min = Math.floor(seconds / 60);
+    const sec = seconds % 60;
+    return min > 0 ? `${min}:${String(sec).padStart(2, "0")}` : `${sec}s`;
   }
 
   function onTick(gu) {
@@ -182,49 +234,72 @@
 
     const live = readSample();
     if (!live) return;
-    const { actual, max } = live;
+    const { actual, max, inFlight } = live;
 
-    const prev = tg.samples.length
-      ? tg.samples[tg.samples.length - 1]
-      : null;
+    const prev = tg.samples.length ? tg.samples[tg.samples.length - 1] : null;
 
-    // --- counterfactual evolution ---
-    if (tg.cfTroops == null) {
-      tg.cfTroops = actual;
-    } else if (max > 0) {
-      tg.cfTroops += troopInc(tg.cfTroops, max);
-      if (tg.cfTroops > max) tg.cfTroops = max;
+    // --- evolve each counterfactual on its own frozen cap ---
+    for (const cf of tg.cfs) {
+      cf.v += troopInc(cf.v, cf.max);
+      if (cf.v > cf.max) cf.v = cf.max;
+      cf.hist.push([tick, cf.v]);
+      if (cf.hist.length > HISTORY_MAX_TICKS) cf.hist.shift();
     }
 
-    // --- own-click spend detection → rebase counterfactual ---
+    // --- own-click spend detection -> new counterfactual ---
     if (prev && tick <= tg.pendingSpendUntilTick) {
-      const expected = max > 0 ? troopInc(prev.actual, max) : 0;
+      const prevMax = prev.max > 0 ? prev.max : max;
+      const expected = prevMax > 0 ? troopInc(prev.actual, prevMax) : 0;
       const delta = actual - prev.actual;
       const drop = expected - delta;
       if (delta < 0 && drop > Math.max(50, expected * 2)) {
-        // The trajectory you were on before this click continues from the
-        // pre-drop value (one regen step forward to stay in sync with now).
-        tg.cfTroops =
-          prev.actual + (max > 0 ? troopInc(prev.actual, max) : 0);
+        const v = prev.actual + expected; // pre-click state, advanced to now
+        tg.cfs.push({
+          id: tg.nextCfId++,
+          tick,
+          amount: drop,
+          v,
+          max: prevMax, // cap frozen at click time: no click, no new land
+          hist: [[tick, v]],
+        });
+        while (tg.cfs.length > MAX_CFS) tg.cfs.shift();
         tg.spendEvents.push({ tick, amount: drop });
-        tg.lastSpendAmount = drop;
-        if (tg.spendEvents.length > 40) tg.spendEvents.shift();
+        if (tg.spendEvents.length > 60) tg.spendEvents.shift();
         tg.pendingSpendUntilTick = -1;
       }
     }
 
-    // Converged: you're back on (or above) the old trajectory.
-    if (tg.cfTroops <= actual) tg.cfTroops = actual;
-
-    // --- derivative (troops/sec, EMA-smoothed) ---
-    if (prev && tick > prev.tick) {
-      const perSec =
-        ((actual - prev.actual) / (tick - prev.tick)) * TICKS_PER_SEC;
-      tg.growthEma =
-        tg.growthEma == null ? perSec : tg.growthEma * 0.85 + perSec * 0.15;
+    // --- retire counterfactuals that actual has caught (click paid off) ---
+    for (let i = tg.cfs.length - 1; i >= 0; i--) {
+      const cf = tg.cfs[i];
+      if (actual >= cf.v) {
+        if (fn.pushBottomRightLog) {
+          fn.pushBottomRightLog(
+            `OFE: spend of ${fmt(cf.amount)} (${fmtMinSec(tick - cf.tick)} ago) paid off.`,
+          );
+        }
+        tg.cfs.splice(i, 1);
+      }
     }
 
-    tg.samples.push({ tick, actual, cf: tg.cfTroops, max });
+    // --- rates ---
+    let rate = null;
+    if (prev && tick > prev.tick) {
+      rate = ((actual - prev.actual) / (tick - prev.tick)) * TICKS_PER_SEC;
+      tg.growthEma =
+        tg.growthEma == null ? rate : tg.growthEma * 0.85 + rate * 0.15;
+    }
+    const pot = max > 0 ? troopInc(actual, max) * TICKS_PER_SEC : null;
+
+    tg.samples.push({
+      tick,
+      actual,
+      effective: actual + inFlight,
+      inFlight,
+      max,
+      rate: tg.growthEma,
+      pot,
+    });
     if (tg.samples.length > HISTORY_MAX_TICKS) {
       tg.samples.splice(0, tg.samples.length - HISTORY_MAX_TICKS);
     }
@@ -321,8 +396,21 @@
     panel.appendChild(subline);
 
     const canvas = document.createElement("canvas");
-    canvas.style.cssText = `display:block;width:100%;height:${CANVAS_H}px;padding:0 4px 2px;box-sizing:border-box`;
+    canvas.style.cssText = `display:block;width:100%;height:${MAIN_H}px;padding:0 4px 0;box-sizing:border-box`;
     panel.appendChild(canvas);
+
+    const rateLabel = document.createElement("div");
+    rateLabel.style.cssText =
+      "padding:3px 8px 0;color:#94a3b8;font-size:10px";
+    rateLabel.innerHTML =
+      `growth rate /s &nbsp;·&nbsp; <span style="color:${COLOR_ACTUAL}">net</span>` +
+      ` <span style="color:${COLOR_POTENTIAL}">potential</span>` +
+      ` <span style="color:#f87171">drain</span>`;
+    panel.appendChild(rateLabel);
+
+    const rateCanvas = document.createElement("canvas");
+    rateCanvas.style.cssText = `display:block;width:100%;height:${RATE_H}px;padding:0 4px 2px;box-sizing:border-box`;
+    panel.appendChild(rateCanvas);
 
     const footer = document.createElement("div");
     footer.style.cssText =
@@ -330,9 +418,10 @@
 
     const legend = document.createElement("span");
     legend.innerHTML =
-      "<span style='color:#6ee7a8'>— now</span> " +
-      "<span style='color:#fbbf24'>-- one click back</span> " +
-      "<span style='color:#64748b'>·· projected</span>";
+      `<span style='color:${COLOR_ACTUAL}'>— pool</span> ` +
+      `<span style='color:${COLOR_EFFECTIVE}'>— +in-flight</span> ` +
+      `<span style='color:${COLOR_CF}'>-- no-click</span> ` +
+      `<span style='color:#64748b'>·· proj</span>`;
     footer.appendChild(legend);
 
     const spacer = document.createElement("span");
@@ -364,7 +453,6 @@
 
     panel.appendChild(footer);
 
-    // Dragging (header only).
     let dragOffset = null;
     header.addEventListener("pointerdown", (e) => {
       dragOffset = {
@@ -397,6 +485,7 @@
     tg.header = header;
     tg.subline = subline;
     tg.canvas = canvas;
+    tg.rateCanvas = rateCanvas;
     tg.horizonBtn = horizonBtn;
     return panel;
   }
@@ -427,6 +516,34 @@
   // Rendering
   // ---------------------------------------------------------------------------
 
+  function setupCanvas(canvas, cssHeight) {
+    const cssWidth = canvas.clientWidth || PANEL_W - 8;
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(cssWidth * dpr)) {
+      canvas.width = Math.round(cssWidth * dpr);
+      canvas.height = Math.round(cssHeight * dpr);
+    }
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+    return { ctx, w: cssWidth, h: cssHeight };
+  }
+
+  function drawSeries(ctx, points, color, dash, width = 1.6) {
+    if (points.length < 2) return;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    ctx.moveTo(points[0][0], points[0][1]);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i][0], points[i][1]);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   function render() {
     if (!tg.visible || state.gamePhase !== "playing") {
       if (tg.panel) tg.panel.style.display = "none";
@@ -436,80 +553,74 @@
     const panel = ensurePanel();
     panel.style.display = "block";
 
-    const last = tg.samples.length
-      ? tg.samples[tg.samples.length - 1]
-      : null;
-
+    const last = tg.samples.length ? tg.samples[tg.samples.length - 1] : null;
     const horizonSec = HORIZONS_SEC[tg.horizonIdx] || 60;
     tg.horizonBtn.textContent = "±" + horizonSec + "s";
 
-    // Header: troops, growth/sec, % of cap colored by growth zone.
+    // Header: troops (+in-flight), growth/sec, % of cap by zone.
     const growth = tg.growthEma;
     const growthColor =
-      growth == null ? "#94a3b8" : growth >= 0 ? "#6ee7a8" : "#f87171";
+      growth == null ? "#94a3b8" : growth >= 0 ? COLOR_ACTUAL : COLOR_SPEND;
     let capHtml = "";
     if (last && last.max > 0) {
       const pct = (last.actual / last.max) * 100;
       const zone = capZone(pct);
-      capHtml = ` <span style="color:${zone.color}">${pct.toFixed(0)}% of cap</span>`;
+      capHtml = `<span style="color:${zone.color}">${pct.toFixed(0)}%</span>`;
     }
+    const flightHtml =
+      last && last.inFlight > 0
+        ? ` <span style="color:${COLOR_EFFECTIVE};font-weight:400">(+${fmt(last.inFlight)}✈)</span>`
+        : "";
     tg.header.innerHTML =
-      `<span style="flex:1">Troops ${last ? fmt(last.actual) : "—"}</span>` +
+      `<span style="flex:1">Troops ${last ? fmt(last.actual) : "—"}${flightHtml}</span>` +
       `<span style="color:${growthColor}">${growth == null ? "" : fmtSigned(growth) + "/s"}</span>` +
-      `<span style="color:#94a3b8;font-weight:400">${capHtml}</span>`;
+      `<span style="font-weight:400">${capHtml}</span>`;
 
-    // Subline: counterfactual delta now and at horizon.
-    if (last && last.cf > last.actual + 1 && last.max > 0) {
-      const ticksAhead = horizonSec * TICKS_PER_SEC;
-      const projActual = projectTrajectory(last.actual, last.max, ticksAhead);
-      const projCf = projectTrajectory(last.cf, last.max, ticksAhead);
-      const deltaNow = last.cf - last.actual;
-      const deltaEnd = projCf[ticksAhead] - projActual[ticksAhead];
+    // Subline: newest counterfactual — cost, gap now, break-even.
+    if (last && tg.cfs.length && last.max > 0) {
+      const cf = tg.cfs[tg.cfs.length - 1];
+      const gapNow = cf.v - last.actual;
+      const be = breakEvenTicks(
+        last.actual,
+        last.max,
+        cf.v,
+        cf.max,
+        BREAK_EVEN_MAX_TICKS,
+      );
+      const beHtml =
+        be == null
+          ? `<span style="color:${COLOR_SPEND}">no break-even &lt;10m</span>`
+          : `breaks even in <span style="color:${COLOR_ACTUAL}">${fmtMinSec(be)}</span>`;
+      const others = tg.cfs.length > 1 ? ` · +${tg.cfs.length - 1} older` : "";
       tg.subline.innerHTML =
-        `one click back: <span style="color:#fbbf24">${fmtSigned(deltaNow)}</span> now, ` +
-        `<span style="color:#fbbf24">${fmtSigned(deltaEnd)}</span> in ${horizonSec}s`;
+        `last click −${fmt(cf.amount)} (${fmtMinSec(tg.lastGameTick - cf.tick)} ago): ` +
+        `<span style="color:${COLOR_CF}">${fmtSigned(-gapNow)}</span> vs no-click · ${beHtml}${others}`;
     } else {
-      tg.subline.textContent = "no recent troop spends — on trajectory";
+      tg.subline.textContent = "no outstanding spends — on trajectory";
     }
 
-    drawChart(horizonSec);
+    drawMainChart(horizonSec);
+    drawRateChart(horizonSec);
   }
 
-  function drawChart(horizonSec) {
-    const canvas = tg.canvas;
-    if (!canvas) return;
-    const cssWidth = canvas.clientWidth || PANEL_W - 8;
-    const cssHeight = CANVAS_H;
-    const dpr = window.devicePixelRatio || 1;
-    if (canvas.width !== Math.round(cssWidth * dpr)) {
-      canvas.width = Math.round(cssWidth * dpr);
-      canvas.height = Math.round(cssHeight * dpr);
-    }
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssWidth, cssHeight);
+  function drawMainChart(horizonSec) {
+    const surface = tg.canvas ? setupCanvas(tg.canvas, MAIN_H) : null;
+    if (!surface) return;
+    const { ctx, w, h } = surface;
 
-    const last = tg.samples.length
-      ? tg.samples[tg.samples.length - 1]
-      : null;
+    const last = tg.samples.length ? tg.samples[tg.samples.length - 1] : null;
     if (!last) return;
 
     const horizonTicks = horizonSec * TICKS_PER_SEC;
-    const pastTicks = horizonTicks; // symmetric window: "now" sits mid-chart
-    const startTick = last.tick - pastTicks;
+    const startTick = last.tick - horizonTicks;
     const endTick = last.tick + horizonTicks;
 
     const projActual =
-      last.max > 0
-        ? projectTrajectory(last.actual, last.max, horizonTicks)
-        : null;
-    const projCf =
-      last.max > 0 && last.cf > last.actual + 1
-        ? projectTrajectory(last.cf, last.max, horizonTicks)
-        : null;
+      last.max > 0 ? projectTrajectory(last.actual, last.max, horizonTicks) : null;
+    const cfProjections = tg.cfs.map((cf) =>
+      projectTrajectory(cf.v, cf.max, horizonTicks),
+    );
 
-    // Y domain across everything drawn.
     let yMin = Infinity;
     let yMax = -Infinity;
     const consider = (v) => {
@@ -520,13 +631,11 @@
     for (const s of tg.samples) {
       if (s.tick < startTick) continue;
       consider(s.actual);
-      if (s.cf > s.actual) consider(s.cf);
+      if (s.effective > s.actual) consider(s.effective);
     }
-    if (projActual) {
-      consider(projActual[0]);
-      consider(projActual[projActual.length - 1]);
-    }
-    if (projCf) consider(projCf[projCf.length - 1]);
+    for (const cf of tg.cfs) consider(cf.v);
+    if (projActual) consider(projActual[projActual.length - 1]);
+    for (const proj of cfProjections) consider(proj[proj.length - 1]);
     if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) return;
     if (yMax - yMin < 20) {
       const mid = (yMax + yMin) / 2;
@@ -541,13 +650,12 @@
     const padR = 34;
     const padT = 4;
     const padB = 12;
-    const plotW = cssWidth - padL - padR;
-    const plotH = cssHeight - padT - padB;
+    const plotW = w - padL - padR;
+    const plotH = h - padT - padB;
     const xOf = (tick) =>
       padL + ((tick - startTick) / (endTick - startTick)) * plotW;
     const yOf = (v) => padT + (1 - (v - yMin) / (yMax - yMin)) * plotH;
 
-    // Gridlines + right-edge labels.
     ctx.strokeStyle = "rgba(148,163,184,0.15)";
     ctx.fillStyle = "#7c8aa0";
     ctx.font = "9px system-ui";
@@ -563,7 +671,6 @@
       ctx.fillText(fmt(v), padL + plotW + 3, y);
     }
 
-    // Troop cap line, if in view.
     if (last.max > 0 && last.max <= yMax) {
       const y = yOf(last.max);
       ctx.strokeStyle = "rgba(148,163,184,0.5)";
@@ -575,7 +682,6 @@
       ctx.setLineDash([]);
     }
 
-    // "Now" vertical line.
     const nowX = xOf(last.tick);
     ctx.strokeStyle = "rgba(226,232,240,0.35)";
     ctx.beginPath();
@@ -584,74 +690,59 @@
     ctx.stroke();
     ctx.fillStyle = "#7c8aa0";
     ctx.textBaseline = "alphabetic";
-    ctx.fillText("now", nowX - 9, cssHeight - 2);
+    ctx.fillText("now", nowX - 9, h - 2);
 
-    const drawSeries = (points, color, dash) => {
-      if (!points.length) return;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.6;
-      ctx.setLineDash(dash);
-      ctx.beginPath();
-      let started = false;
-      for (const [x, y] of points) {
-        if (!started) {
-          ctx.moveTo(x, y);
-          started = true;
-        } else {
-          ctx.lineTo(x, y);
-        }
+    // Counterfactual histories + projections (older = fainter).
+    tg.cfs.forEach((cf, i) => {
+      const age = tg.cfs.length - 1 - i; // 0 = newest
+      const alpha = Math.max(0.25, 1 - age * 0.25);
+      const color = `rgba(251,191,36,${alpha})`;
+      const pts = [];
+      for (const [t, v] of cf.hist) {
+        if (t < startTick) continue;
+        pts.push([xOf(t), yOf(v)]);
       }
-      ctx.stroke();
-      ctx.setLineDash([]);
-    };
+      drawSeries(ctx, pts, color, [4, 3]);
+      const proj = cfProjections[i];
+      if (proj) {
+        const ppts = [];
+        for (let k = 0; k < proj.length; k += 5) {
+          ppts.push([xOf(last.tick + k), yOf(proj[k])]);
+        }
+        drawSeries(ctx, ppts, `rgba(251,191,36,${alpha * 0.7})`, [1.5, 3]);
+      }
+    });
 
-    // Counterfactual history (only where it diverges).
-    const cfPts = [];
+    // Effective (pool + in-flight): draw only where it exceeds the pool.
+    let seg = [];
     for (const s of tg.samples) {
       if (s.tick < startTick) continue;
-      if (s.cf > s.actual + 1) cfPts.push([xOf(s.tick), yOf(s.cf)]);
-      else if (cfPts.length && cfPts[cfPts.length - 1] !== null) {
-        cfPts.push(null);
-      }
-    }
-    // Split on gaps.
-    let seg = [];
-    for (const p of cfPts) {
-      if (p === null) {
-        drawSeries(seg, "#fbbf24", [4, 3]);
+      if (s.effective > s.actual + 1) {
+        seg.push([xOf(s.tick), yOf(s.effective)]);
+      } else if (seg.length) {
+        drawSeries(ctx, seg, COLOR_EFFECTIVE, [], 1.1);
         seg = [];
-      } else {
-        seg.push(p);
       }
     }
-    drawSeries(seg, "#fbbf24", [4, 3]);
+    drawSeries(ctx, seg, COLOR_EFFECTIVE, [], 1.1);
 
-    // Actual history.
+    // Actual pool history + projection.
     const actualPts = [];
     for (const s of tg.samples) {
       if (s.tick < startTick) continue;
       actualPts.push([xOf(s.tick), yOf(s.actual)]);
     }
-    drawSeries(actualPts, "#6ee7a8", []);
-
-    // Projections (sampled every 5 ticks to keep point counts small).
+    drawSeries(ctx, actualPts, COLOR_ACTUAL, []);
     if (projActual) {
       const pts = [];
-      for (let i = 0; i < projActual.length; i += 5) {
-        pts.push([xOf(last.tick + i), yOf(projActual[i])]);
+      for (let k = 0; k < projActual.length; k += 5) {
+        pts.push([xOf(last.tick + k), yOf(projActual[k])]);
       }
-      drawSeries(pts, "rgba(110,231,168,0.7)", [1.5, 3]);
-    }
-    if (projCf) {
-      const pts = [];
-      for (let i = 0; i < projCf.length; i += 5) {
-        pts.push([xOf(last.tick + i), yOf(projCf[i])]);
-      }
-      drawSeries(pts, "rgba(251,191,36,0.7)", [1.5, 3]);
+      drawSeries(ctx, pts, "rgba(110,231,168,0.7)", [1.5, 3]);
     }
 
-    // Spend-event markers.
-    ctx.fillStyle = "#f87171";
+    // Spend markers.
+    ctx.fillStyle = COLOR_SPEND;
     for (const ev of tg.spendEvents) {
       if (ev.tick < startTick || ev.tick > last.tick) continue;
       const x = xOf(ev.tick);
@@ -661,6 +752,149 @@
       ctx.lineTo(x, padT + plotH - 5);
       ctx.closePath();
       ctx.fill();
+    }
+  }
+
+  function drawRateChart(horizonSec) {
+    const surface = tg.rateCanvas ? setupCanvas(tg.rateCanvas, RATE_H) : null;
+    if (!surface) return;
+    const { ctx, w, h } = surface;
+
+    const last = tg.samples.length ? tg.samples[tg.samples.length - 1] : null;
+    if (!last) return;
+
+    const horizonTicks = horizonSec * TICKS_PER_SEC;
+    const startTick = last.tick - horizonTicks;
+    const endTick = last.tick + horizonTicks;
+
+    // Projected rate: derivative of the pure-regen projection (drain-free).
+    const projActual =
+      last.max > 0 ? projectTrajectory(last.actual, last.max, horizonTicks) : null;
+
+    let yMin = 0;
+    let yMax = -Infinity;
+    for (const s of tg.samples) {
+      if (s.tick < startTick) continue;
+      if (Number.isFinite(s.rate)) {
+        if (s.rate > yMax) yMax = s.rate;
+        if (s.rate < yMin) yMin = s.rate;
+      }
+      if (Number.isFinite(s.pot) && s.pot > yMax) yMax = s.pot;
+    }
+    if (projActual) {
+      for (let k = 5; k < projActual.length; k += 5) {
+        const r = (projActual[k] - projActual[k - 5]) * 2; // per sec
+        if (r > yMax) yMax = r;
+      }
+    }
+    if (!Number.isFinite(yMax) || yMax <= yMin) yMax = yMin + 10;
+    const span = yMax - yMin;
+    yMax += span * 0.12;
+    if (yMin < 0) yMin -= span * 0.08;
+
+    const padL = 4;
+    const padR = 34;
+    const padT = 3;
+    const padB = 3;
+    const plotW = w - padL - padR;
+    const plotH = h - padT - padB;
+    const xOf = (tick) =>
+      padL + ((tick - startTick) / (endTick - startTick)) * plotW;
+    const yOf = (v) => padT + (1 - (v - yMin) / (yMax - yMin)) * plotH;
+
+    ctx.strokeStyle = "rgba(148,163,184,0.15)";
+    ctx.fillStyle = "#7c8aa0";
+    ctx.font = "9px system-ui";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 2; i++) {
+      const v = yMin + ((yMax - yMin) * i) / 2;
+      const y = yOf(v);
+      ctx.beginPath();
+      ctx.moveTo(padL, y);
+      ctx.lineTo(padL + plotW, y);
+      ctx.stroke();
+      ctx.fillText(fmt(v), padL + plotW + 3, y);
+    }
+
+    // Zero line (visible when negative rates in view).
+    if (yMin < 0) {
+      const y = yOf(0);
+      ctx.strokeStyle = "rgba(226,232,240,0.3)";
+      ctx.beginPath();
+      ctx.moveTo(padL, y);
+      ctx.lineTo(padL + plotW, y);
+      ctx.stroke();
+    }
+
+    // Drain fill: area between potential and net where net < potential.
+    ctx.fillStyle = COLOR_DRAIN;
+    let region = null;
+    const flushRegion = () => {
+      if (!region || region.top.length < 2) {
+        region = null;
+        return;
+      }
+      ctx.beginPath();
+      ctx.moveTo(region.top[0][0], region.top[0][1]);
+      for (let i = 1; i < region.top.length; i++) {
+        ctx.lineTo(region.top[i][0], region.top[i][1]);
+      }
+      for (let i = region.bottom.length - 1; i >= 0; i--) {
+        ctx.lineTo(region.bottom[i][0], region.bottom[i][1]);
+      }
+      ctx.closePath();
+      ctx.fill();
+      region = null;
+    };
+    for (const s of tg.samples) {
+      if (s.tick < startTick) continue;
+      const drainVisible =
+        Number.isFinite(s.rate) && Number.isFinite(s.pot) && s.pot > s.rate + 5;
+      if (drainVisible) {
+        if (!region) region = { top: [], bottom: [] };
+        region.top.push([xOf(s.tick), yOf(s.pot)]);
+        region.bottom.push([xOf(s.tick), yOf(Math.max(s.rate, yMin))]);
+      } else {
+        flushRegion();
+      }
+    }
+    flushRegion();
+
+    // Potential regen rate (grey) and net rate (green).
+    const potPts = [];
+    const netPts = [];
+    for (const s of tg.samples) {
+      if (s.tick < startTick) continue;
+      if (Number.isFinite(s.pot)) potPts.push([xOf(s.tick), yOf(s.pot)]);
+      if (Number.isFinite(s.rate)) netPts.push([xOf(s.tick), yOf(s.rate)]);
+    }
+    drawSeries(ctx, potPts, "rgba(148,163,184,0.8)", [], 1.1);
+    drawSeries(ctx, netPts, COLOR_ACTUAL, [], 1.4);
+
+    // Projected drain-free rate.
+    if (projActual) {
+      const pts = [];
+      for (let k = 5; k < projActual.length; k += 5) {
+        const r = (projActual[k] - projActual[k - 5]) * 2;
+        pts.push([xOf(last.tick + k), yOf(r)]);
+      }
+      drawSeries(ctx, pts, "rgba(148,163,184,0.6)", [1.5, 3], 1.1);
+    }
+
+    // Now line + spend markers.
+    const nowX = xOf(last.tick);
+    ctx.strokeStyle = "rgba(226,232,240,0.35)";
+    ctx.beginPath();
+    ctx.moveTo(nowX, padT);
+    ctx.lineTo(nowX, padT + plotH);
+    ctx.stroke();
+
+    ctx.fillStyle = COLOR_SPEND;
+    for (const ev of tg.spendEvents) {
+      if (ev.tick < startTick || ev.tick > last.tick) continue;
+      const x = xOf(ev.tick);
+      ctx.fillRect(x - 0.5, padT, 1, plotH);
     }
   }
 
