@@ -152,6 +152,20 @@
     }
   };
 
+  ns._tickListeners = ns._tickListeners || [];
+  fn.onGameTick = (callback) => {
+    if (typeof callback === "function") {
+      ns._tickListeners.push(callback);
+    }
+  };
+
+  ns._intentListeners = ns._intentListeners || [];
+  fn.onOwnIntent = (callback) => {
+    if (typeof callback === "function") {
+      ns._intentListeners.push(callback);
+    }
+  };
+
   function soundEnabled(key) {
     return fn.extensionSoundEnabled ? fn.extensionSoundEnabled(key) : true;
   }
@@ -1628,6 +1642,9 @@
     publishBuildingStackMarkers();
     publishMarkerTransform();
 
+    for (const cb of ns._tickListeners) {
+      try { cb(gu); } catch (_) {}
+    }
   }
 
   fn.triggerTerritoryCycle = () => {
@@ -1949,6 +1966,11 @@
             msg.intent.type === "allianceExtension"
           ) {
             fn.noteAllianceExtensionIntent?.(Number(msg.intent.recipient));
+          }
+          if (msg && msg.type === "intent" && msg.intent) {
+            for (const cb of ns._intentListeners) {
+              try { cb(msg.intent); } catch (_) {}
+            }
           }
         } catch (_) {}
       }

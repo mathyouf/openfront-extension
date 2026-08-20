@@ -56,6 +56,12 @@
       desc: "Jump to the most recent clickable OFE alert.",
       defaultCode: "KeyJ",
     },
+    troopGraph: {
+      action: "troopGraph",
+      label: "Troop Graph",
+      desc: "Toggle the troop trajectory graph (growth rate + one-click-back counterfactual).",
+      defaultCode: "KeyI",
+    },
   };
 
   ns.constants.EXT_SOUND_SETTINGS = {

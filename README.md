@@ -18,6 +18,14 @@ Chrome extension that adds quality-of-life improvements to [openfront.io](https:
 - **Neighbor alerts** — Sleeping neighbors and traitor neighbors each have their own sound and setting.
 - **Missile alerts** — Separate alarms play for atom bombs, hydrogen bombs, and MIRVs.
 
+### Troop graph
+A draggable top-right panel (toggle with `I`) that turns your troop counter into a trajectory:
+- **Growth rate** — your live troop growth in troops/sec (smoothed first derivative), plus your troops as % of cap, color-coded by regen zone (mid-range grows fastest).
+- **Forward projection** — where your troop count is headed over the next 30s/60s/120s/300s (cycle with the `±60s` button), simulated with the game's exact regen formula and your current troop cap.
+- **"One click back" counterfactual** — when you spend troops (attack, boat, donation), an amber dashed line keeps growing the trajectory you were on *before* that click, and the panel shows how far behind it you are now and at the projection horizon. Watch the gap decay as you regrow — or widen when spending put you on a slower part of the regen curve. Red markers flag each spend. Only your own actions rebase the counterfactual; combat losses don't.
+
+Info-only: it reads game state and never acts for you.
+
 ### Territory cycle
 - **Mini Territories cycle** — The `Mini Territories` shortcut cycles the camera through your disconnected mini territories (100 tiles or fewer), skipping the shortcut if your land is fully connected or there are no mini territories.
 
@@ -32,6 +40,7 @@ All shortcuts are rebindable in the extension's `Extension` settings tab.
 | `N` | Boat 1% | Sends a boat attack using only 1% of your troops |
 | `H` | Mini Territories | Jumps camera between your disconnected mini territories (100 tiles or fewer) |
 | `J` | Last OFE Alert | Jumps to the most recent clickable OFE alert |
+| `I` | Troop Graph | Toggles the troop trajectory graph panel |
 
 ### Neighbor alerts
 Notifications appear in the bottom-right when a neighboring player:

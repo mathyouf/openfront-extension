@@ -76,6 +76,10 @@
             }
             break;
           }
+          case "troopGraph": {
+            if (fn.toggleTroopGraph) fn.toggleTroopGraph();
+            break;
+          }
           default:
             break;
         }

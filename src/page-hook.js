@@ -19,6 +19,7 @@
   ns.fn.initShortcutHandlers?.();
   ns.fn.initSettingsIntegration?.();
   ns.fn.initEventsPanelIntegration?.();
+  ns.fn.initTroopGraph?.();
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
